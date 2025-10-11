@@ -5,11 +5,13 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import ScrollToTop from './components/ScrollToTop';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Products from './pages/Products';
 import ProductDetail from './pages/ProductDetail';
+import About from './pages/About';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/Dashboard';
@@ -92,6 +94,7 @@ const AppRoutes = () => {
       <Route path="/register" element={<PublicLayout><Register /></PublicLayout>} />
       <Route path="/products" element={<PublicLayout><Products /></PublicLayout>} />
       <Route path="/products/:id" element={<PublicLayout><ProductDetail /></PublicLayout>} />
+      <Route path="/about" element={<PublicLayout><About /></PublicLayout>} />
 
       {/* Admin Routes - Tanpa Navbar & Footer */}
       <Route
@@ -353,6 +356,7 @@ const AppRoutes = () => {
 function App() {
   return (
     <Router>
+      <ScrollToTop />
       <AuthProvider>
         <CartProvider>
           <AppRoutes />
