@@ -13,6 +13,11 @@ const Navbar = () => {
   const handleLogout = () => {
     logout();
     navigate('/');
+    setIsOpen(false);
+  };
+
+  const closeMenu = () => {
+    setIsOpen(false);
   };
 
   const getDashboardLink = () => {
@@ -104,24 +109,24 @@ const Navbar = () => {
       {isOpen && (
         <div className="md:hidden bg-white border-t">
           <div className="px-2 pt-2 pb-3 space-y-1">
-            <Link to="/" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+            <Link to="/" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
               Beranda
             </Link>
-            <Link to="/products" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+            <Link to="/products" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
               Produk
             </Link>
-            <Link to="/about" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+            <Link to="/about" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
               Tentang
             </Link>
 
             {isAuthenticated ? (
               <>
                 {user.role === 'pembeli' && (
-                  <Link to="/pembeli/cart" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+                  <Link to="/pembeli/cart" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
                     Keranjang ({getCartCount()})
                   </Link>
                 )}
-                <Link to={getDashboardLink()} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+                <Link to={getDashboardLink()} onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
                   Dashboard
                 </Link>
                 <button
@@ -133,10 +138,10 @@ const Navbar = () => {
               </>
             ) : (
               <>
-                <Link to="/login" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+                <Link to="/login" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
                   Masuk
                 </Link>
-                <Link to="/register" className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
+                <Link to="/register" onClick={closeMenu} className="block px-3 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600 rounded">
                   Daftar
                 </Link>
               </>
