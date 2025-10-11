@@ -16,10 +16,6 @@ const Products = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState(searchParams.get('category') || 'all');
 
-  useEffect(() => {
-    fetchProducts();
-  }, [filter]);
-
   const fetchProducts = async () => {
     try {
       setLoading(true);
@@ -32,6 +28,11 @@ const Products = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
 
   const handleAddToCart = async (product) => {
     // Cek apakah user sudah login dan rolenya pembeli
@@ -56,7 +57,7 @@ const Products = () => {
       toast.success('Produk berhasil ditambahkan ke keranjang!', {
         position: 'top-right',
       });
-    } catch (error) {
+    } catch {
       toast.error('Gagal menambahkan produk ke keranjang');
     }
   };
