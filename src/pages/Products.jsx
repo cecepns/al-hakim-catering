@@ -72,12 +72,12 @@ const Products = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
+        <div className="mb-8 mt-14">
           <h1 className="text-3xl font-bold text-gray-900">Produk Kami</h1>
           <p className="text-gray-600 mt-2">Pilih produk sesuai kebutuhan Anda</p>
         </div>
 
-        <div className="flex space-x-2 mb-6 overflow-x-auto pb-2">
+        <div className="flex space-x-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
           {categories.map((cat) => (
             <button
               key={cat.value}
