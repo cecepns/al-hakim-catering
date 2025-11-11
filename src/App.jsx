@@ -12,6 +12,7 @@ import Register from './pages/Register';
 import Products from './pages/Products';
 import ProductDetail from './pages/ProductDetail';
 import About from './pages/About';
+import Checkout from './pages/Checkout';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/Dashboard';
@@ -27,7 +28,7 @@ import AdminReviews from './pages/admin/Reviews';
 // Pembeli Pages
 import PembeliDashboard from './pages/pembeli/Dashboard';
 import Cart from './pages/pembeli/Cart';
-import Checkout from './pages/pembeli/Checkout';
+import PembeliCheckout from './pages/pembeli/Checkout';
 import PembeliOrders from './pages/pembeli/Orders';
 import PembeliOrderDetail from './pages/pembeli/OrderDetail';
 import Cashback from './pages/pembeli/Cashback';
@@ -94,6 +95,7 @@ const AppRoutes = () => {
       <Route path="/register" element={<PublicLayout><Register /></PublicLayout>} />
       <Route path="/products" element={<PublicLayout><Products /></PublicLayout>} />
       <Route path="/products/:id" element={<PublicLayout><ProductDetail /></PublicLayout>} />
+      <Route path="/checkout" element={<PublicLayout><Checkout /></PublicLayout>} />
       <Route path="/about" element={<PublicLayout><About /></PublicLayout>} />
 
       {/* Admin Routes - Tanpa Navbar & Footer */}
@@ -199,7 +201,7 @@ const AppRoutes = () => {
         path="/pembeli/checkout"
         element={
           <ProtectedRoute allowedRoles={['pembeli']}>
-            <Checkout />
+            <PembeliCheckout />
           </ProtectedRoute>
         }
       />

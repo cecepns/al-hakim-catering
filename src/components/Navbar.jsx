@@ -47,7 +47,7 @@ const Navbar = () => {
         <div className="flex justify-between py-4">
           <div className="flex items-center">
             <Link to="/" className="flex items-center space-x-2">
-              <img src={Logo} alt="logo" className="w-20 h-auto"/>                
+              <img src={Logo} alt="logo" className="w-44 h-auto"/>                
             </Link>
           </div>
 

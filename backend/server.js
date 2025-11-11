@@ -1465,6 +1465,56 @@ app.put('/api/users/:id/role', authenticateToken, authorizeRole('admin'), async 
   }
 });
 
+// ========================================
+// KITCHEN CHECKLIST ENDPOINTS
+// ========================================
+app.get('/api/orders/:id/kitchen-checklist', authenticateToken, async (req, res) => {
+  try {
+    const [checklists] = await pool.query(
+      'SELECT * FROM kitchen_checklists WHERE order_id = ? ORDER BY created_at DESC LIMIT 1',
+      [req.params.id]
+    );
+
+    if (checklists.length === 0) {
+      // Return default empty checklist if none exists
+      return res.json({ checklist_data: getDefaultChecklist(), order_id: req.params.id });
+    }
+
+    res.json(checklists[0]);
+  } catch (error) {
+    console.error('Get kitchen checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/orders/:id/kitchen-checklist', authenticateToken, async (req, res) => {
+  try {
+    const { checklist_data } = req.body;
+    const orderId = req.params.id;
+    const userId = req.user.id;
+
+    // Check if order exists
+    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    // Insert or update checklist
+    const [result] = await pool.query(
+      'INSERT INTO kitchen_checklists (order_id, checklist_data, saved_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, saved_by = ?, updated_at = NOW()',
+      [orderId, JSON.stringify(checklist_data), userId, JSON.stringify(checklist_data), userId]
+    );
+
+    res.status(201).json({
+      message: 'Checklist berhasil disimpan',
+      checklist_id: result.insertId
+    });
+  } catch (error) {
+    console.error('Save kitchen checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({ message: 'API Al Hakim Catering berjalan dengan baik!' });
 });
@@ -1472,3 +1522,78 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server berjalan di http://localhost:${PORT}`);
 });
+
+// Helper function to return default checklist structure
+function getDefaultChecklist() {
+  return {
+    sections: [
+      {
+        id: 'prep_bahan',
+        title: 'PERSIAPAN BAHAN & BARANG',
+        items: [
+          { id: 'prep_1', text: 'Lakukan persiapan produksi sebelum tanggal acara', checked: false },
+          { id: 'prep_2', text: 'Cek stok bahan/produk di gudang / kulkas', checked: false },
+          { id: 'prep_3', text: 'Pisahkan bahan mentah, produk jadi, dan perlengkapan non-makanan', checked: false },
+          { id: 'prep_4', text: 'Catat kebutuhan pembelian barang', checked: false },
+          { id: 'prep_5', text: 'Beli barang sesuai kebutuhan', checked: false },
+          { id: 'prep_6', text: 'Koordinasi dengan admin operasional untuk catat pengeluaran di arus kas', checked: false },
+          { id: 'prep_7', text: 'Siapkan kemasan dan label sesuai jenis produk', checked: false },
+          { id: 'prep_8', text: 'Pastikan semua alat dan area kerja bersih sebelum digunakan', checked: false }
+        ]
+      },
+      {
+        id: 'penataan_produksi',
+        title: 'PENATAAN & PRODUKSI UMUM',
+        items: [
+          { id: 'prod_1', text: 'Siapkan dan produksi produk sesuai pesanan', checked: false },
+          { id: 'prod_2', text: 'Pastikan setiap item sesuai standar dan kualitas baik', checked: false },
+          { id: 'prod_3', text: 'Cek kelengkapan item', checked: false },
+          { id: 'prod_4', text: 'Gunakan area kerja bersih dan rapi', checked: false },
+          { id: 'prod_5', text: 'Pisahkan produk yang rusak, kotor, atau tidak layak pakai', checked: false }
+        ]
+      },
+      {
+        id: 'kebersihan_higienis',
+        title: 'KEBERSIHAN & HIGIENIS',
+        items: [
+          { id: 'hygiene_1', text: 'Gunakan sarung tangan, masker, dan celemek saat bekerja', checked: false },
+          { id: 'hygiene_2', text: 'Bersihkan alat, meja, dan lantai secara rutin', checked: false },
+          { id: 'hygiene_3', text: 'Simpan bahan dan produk di tempat tertutup & aman', checked: false },
+          { id: 'hygiene_4', text: 'Pastikan kemasan, wadah, dan perlengkapan bersih sebelum digunakan', checked: false },
+          { id: 'hygiene_5', text: 'Buang sampah dan sisa produksi ke tempat tertutup', checked: false }
+        ]
+      },
+      {
+        id: 'pengemasan',
+        title: 'PENGEMASAN',
+        items: [
+          { id: 'pack_1', text: 'Siapkan area pengemasan khusus (bersih, kering, bebas debu)', checked: false },
+          { id: 'pack_2', text: 'Gunakan kemasan yang sesuai', checked: false },
+          { id: 'pack_3', text: 'Pastikan isi lengkap dan sesuai pesanan', checked: false },
+          { id: 'pack_4', text: 'Kemas dengan rapi dan aman', checked: false }
+        ]
+      },
+      {
+        id: 'persiapan_pengiriman',
+        title: 'PERSIAPAN PENGIRIMAN / SERAH TERIMA',
+        items: [
+          { id: 'ship_1', text: 'Cek ulang jumlah pesanan dan jenis produk', checked: false },
+          { id: 'ship_2', text: 'Foto dokumentasi hasil akhir sebelum dikirim', checked: false },
+          { id: 'ship_3', text: 'Konfirmasi ke bagian kurir dan admin operasional bahwa pesanan siap dikirim', checked: false }
+        ]
+      },
+      {
+        id: 'penutup_evaluasi',
+        title: 'PENUTUP & EVALUASI',
+        items: [
+          { id: 'close_1', text: 'Bersihkan seluruh area kerja dan alat', checked: false },
+          { id: 'close_2', text: 'Simpan bahan sisa yang masih layak pakai', checked: false },
+          { id: 'close_3', text: 'Catat bahan atau perlengkapan yang perlu diisi ulang', checked: false },
+          { id: 'close_4', text: 'Beli barang sesuai kebutuhan', checked: false },
+          { id: 'close_5', text: 'Koordinasi dengan admin operasional untuk catat pengeluaran di arus kas', checked: false },
+          { id: 'close_6', text: 'Apabila ada kendala, segera selesaikan', checked: false }
+        ]
+      }
+    ]
+  };
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { UtensilsCrossed, Beef, PartyPopper, ShoppingBag } from 'lucide-react';
+import { UtensilsCrossed, Beef, PartyPopper, ShoppingBag, ArrowRight } from 'lucide-react';
 import AOS from 'aos';
 import 'aos/dist/aos.css';
 import { productAPI, bannerAPI } from '../utils/api';
@@ -43,7 +43,24 @@ const Home = () => {
   const fetchPromoProducts = async () => {
     try {
       const response = await productAPI.getPromo();
-      setPromoProducts(response.data);
+      
+      // Fetch images for each product and use first image if available
+      const productsWithImages = await Promise.all(
+        response.data.map(async (product) => {
+          try {
+            const imagesRes = await productAPI.getImages(product.id);
+            const images = imagesRes.data || [];
+            // Use first image if available, otherwise use product.image_url
+            const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
+            return { ...product, image_url: displayImage };
+          } catch (error) {
+            // If images fetch fails, keep the original image_url
+            return product;
+          }
+        })
+      );
+      
+      setPromoProducts(productsWithImages);
     } catch (error) {
       console.error('Error fetching promo products:', error);
     }
@@ -53,26 +70,26 @@ const Home = () => {
     {
       name: 'Catering',
       icon: UtensilsCrossed,
-      description: 'Layanan catering untuk berbagai acara',
+      description: 'Layanan catering untuk berbagai acara — dari nasi kotak, prasmanan, tumpeng, dll',
       link: '/products?category=catering',
     },
     {
       name: 'Aqiqah',
       icon: Beef,
-      description: 'Paket aqiqah lengkap dan berkualitas',
+      description: 'Paket aqiqah lengkap dan siap saji, tersedia juga paket nasi kotak.',
       link: '/products?category=aqiqah',
-    },
-    {
-      name: 'Event',
-      icon: PartyPopper,
-      description: 'Organizer untuk event spesial Anda',
-      link: '/products?category=event',
     },
     {
       name: 'Store',
       icon: ShoppingBag,
-      description: 'Produk makanan siap saji',
+      description: 'Beragam produk keperluan acara seperti buku Yasin, souvenir, perlengkapan ibadah, oleh-oleh umroh dll',
       link: '/products?category=store',
+    },
+    {
+      name: 'Event',
+      icon: PartyPopper,
+      description: 'Layanan paket event lengkap: hajatan, aqiqah, lamaran, wedding, khitanan, hingga dekorasi.',
+      link: '/products?category=event',
     },
   ];
 
@@ -150,7 +167,7 @@ const Home = () => {
               <Link
                 key={index}
                 to={category.link}
-                className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-2"
+                className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition transform hover:-translate-y-2 group"
                 data-aos="fade-up"
                 data-aos-delay={index * 100}
               >
@@ -162,9 +179,13 @@ const Home = () => {
                 <h3 className="text-xl font-bold text-center mb-2 text-gray-900">
                   {category.name}
                 </h3>
-                <p className="text-gray-600 text-center text-sm">
+                <p className="text-gray-600 text-center text-sm mb-4">
                   {category.description}
                 </p>
+                <div className="flex items-center justify-center gap-2 text-primary-600 font-semibold group-hover:gap-3 transition-all">
+                  <span>Lihat selengkapnya</span>
+                  <ArrowRight className="w-4 h-4" />
+                </div>
               </Link>
             );
           })}
@@ -176,7 +197,7 @@ const Home = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12" data-aos="fade-up">
               <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-                Produk Promo
+                Produk Recommended
               </h2>
               <p className="text-gray-600 text-lg">
                 Dapatkan penawaran terbaik untuk produk pilihan
@@ -257,33 +278,69 @@ const Home = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Kualitas Terjamin</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Berpengalaman & Terpercaya</h3>
               <p className="text-gray-600">
-                Menggunakan bahan berkualitas dan proses yang higienis
+                Berdiri sejak 2019 dengan pengalaman melayani ribuan pelanggan
               </p>
             </div>
 
             <div className="text-center" data-aos="fade-up" data-aos-delay="200">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Tepat Waktu</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Cita Rasa Lezat</h3>
               <p className="text-gray-600">
-                Pengiriman selalu tepat waktu sesuai jadwal
+                Dengan bahan premium dan proses pengolahan higienis
               </p>
             </div>
 
             <div className="text-center" data-aos="fade-up" data-aos-delay="300">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Pelayanan Terbaik</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Layanan Praktis & Profesional</h3>
               <p className="text-gray-600">
-                Tim profesional siap melayani kebutuhan Anda
+                Tim profesional siap melayani dengan cepat dan ramah
+              </p>
+            </div>
+
+            <div className="text-center" data-aos="fade-up" data-aos-delay="400">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Bisa Bayar di Tempat</h3>
+              <p className="text-gray-600">
+                COD (Cash on Delivery) untuk kemudahan pembayaran
+              </p>
+            </div>
+
+            <div className="text-center" data-aos="fade-up" data-aos-delay="500">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Siap Antar</h3>
+              <p className="text-gray-600">
+                Dengan ongkir seikhlasnya atau free ongkir untuk wilayah tertentu
+              </p>
+            </div>
+
+            <div className="text-center" data-aos="fade-up" data-aos-delay="600">
+              <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Potongan Harga</h3>
+              <p className="text-gray-600">
+                Bagi reseller dan dropship, plus gratis voucher diskon
               </p>
             </div>
           </div>

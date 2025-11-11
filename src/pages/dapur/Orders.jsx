@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -9,11 +10,7 @@ const DapurOrders = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    fetchOrders();
-  }, [filter]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const params = { role: 'dapur' };
@@ -27,7 +24,11 @@ const DapurOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -37,6 +38,32 @@ const DapurOrders = () => {
       selesai: 'bg-green-100 text-green-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getDaysUntilEvent = (eventDate) => {
+    if (!eventDate) return null;
+    const today = new Date();
+    const event = new Date(eventDate);
+    const diffTime = event - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const isEventUrgent = (eventDate) => {
+    const daysUntil = getDaysUntilEvent(eventDate);
+    return daysUntil !== null && daysUntil <= 7 && daysUntil > 0;
+  };
+
+  const hasUrgentOrders = orders.some((order) => isEventUrgent(order.guest_event_date));
+
+  const formatEventDateTime = (date, time) => {
+    if (!date) return '-';
+    const dateStr = new Date(date).toLocaleDateString('id-ID', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    return time ? `${dateStr} ${time}` : dateStr;
   };
 
   const statuses = [
@@ -104,7 +131,7 @@ const DapurOrders = () => {
                       Pelanggan
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tanggal
+                      Tanggal/Waktu Acara
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Total
@@ -127,7 +154,13 @@ const DapurOrders = () => {
                         {order.customer_name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {new Date(order.created_at).toLocaleDateString('id-ID')}
+                        {formatEventDateTime(order.guest_event_date, order.guest_event_time)}
+                        {isEventUrgent(order.guest_event_date) && (
+                          <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
+                            <AlertCircle size={14} />
+                            {getDaysUntilEvent(order.guest_event_date)} hari lagi
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         Rp {formatRupiah(order.total_amount)}
@@ -153,6 +186,20 @@ const DapurOrders = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {hasUrgentOrders && (
+            <div className="mt-6 bg-orange-50 border-l-4 border-orange-400 p-4 rounded-lg">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="text-orange-600 mt-0.5" size={20} />
+                <div>
+                  <p className="text-orange-800 font-semibold">⚠️ Pesanan harus segera diproses</p>
+                  <p className="text-orange-700 text-sm mt-1">
+                    Ada pesanan dengan acara dalam 7 hari ke depan yang memerlukan perhatian segera.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
         </div>

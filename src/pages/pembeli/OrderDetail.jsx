@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const PembeliOrderDetail = () => {
@@ -75,7 +75,24 @@ const PembeliOrderDetail = () => {
             <div>
               <h3 className="font-semibold text-gray-900 mb-2">Alamat Pengiriman</h3>
               <p className="text-gray-700">{order.delivery_address}</p>
-              {order.delivery_notes && <p className="text-sm text-gray-600 mt-2">Catatan: {order.delivery_notes}</p>}
+              {order.delivery_notes && (
+                <div className="text-sm text-gray-600 mt-2">
+                  <span className="font-medium">Catatan:</span>
+                  {(() => {
+                    const notes = parseDeliveryNotes(order.delivery_notes, false);
+                    if (Array.isArray(notes)) {
+                      return (
+                        <div className="mt-1 space-y-1">
+                          {notes.map((line, idx) => (
+                            <p key={idx}>{line}</p>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return <span className="ml-1">{notes}</span>;
+                  })()}
+                </div>
+              )}
             </div>
             <div>
               <h3 className="font-semibold text-gray-900 mb-2">Pembayaran</h3>

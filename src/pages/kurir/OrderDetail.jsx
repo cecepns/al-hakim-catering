@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const KurirOrderDetail = () => {
@@ -166,12 +166,24 @@ const KurirOrderDetail = () => {
                     Alamat Pengiriman:
                   </h3>
                   <p className="text-gray-700 leading-relaxed">{order.delivery_address}</p>
-                  {order.delivery_notes && (
-                    <div className="mt-2 pt-2 border-t border-primary-200">
-                      <p className="text-sm font-medium text-gray-600">Catatan:</p>
-                      <p className="text-sm text-gray-700">{order.delivery_notes}</p>
-                    </div>
-                  )}
+                  {order.delivery_notes && (() => {
+                    const notes = parseDeliveryNotes(order.delivery_notes, true);
+                    if (!notes) return null;
+                    return (
+                      <div className="mt-2 pt-2 border-t border-primary-200">
+                        <p className="text-sm font-medium text-gray-600 mb-2">Catatan Pengiriman:</p>
+                        {Array.isArray(notes) ? (
+                          <div className="text-sm text-gray-700 space-y-1">
+                            {notes.map((line, idx) => (
+                              <p key={idx}>{line}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-700">{notes}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg">

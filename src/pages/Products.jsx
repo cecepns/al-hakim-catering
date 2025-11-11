@@ -3,15 +3,11 @@ import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { productAPI } from '../utils/api';
 import { getImageUrl } from '../utils/imageHelper';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
 import { formatRupiah } from '../utils/formatHelper';
 
 const Products = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { addToCart } = useCart();
-  const { user } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState(searchParams.get('category') || 'all');
@@ -21,7 +17,24 @@ const Products = () => {
       setLoading(true);
       const params = filter !== 'all' ? { category: filter } : {};
       const response = await productAPI.getAll(params);
-      setProducts(response.data);
+      
+      // Fetch images for each product and use first image if available
+      const productsWithImages = await Promise.all(
+        response.data.map(async (product) => {
+          try {
+            const imagesRes = await productAPI.getImages(product.id);
+            const images = imagesRes.data || [];
+            // Use first image if available, otherwise use product.image_url
+            const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
+            return { ...product, image_url: displayImage };
+          } catch (error) {
+            // If images fetch fails, keep the original image_url
+            return product;
+          }
+        })
+      );
+      
+      setProducts(productsWithImages);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {
@@ -34,32 +47,13 @@ const Products = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
-  const handleAddToCart = async (product) => {
-    // Cek apakah user sudah login dan rolenya pembeli
-    if (!user) {
-      toast.warning('Silakan login terlebih dahulu untuk menambahkan produk ke keranjang', {
-        position: 'top-center',
-        autoClose: 2000,
-      });
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
+  const handleBuyNow = (product) => {
+    // Navigate directly to checkout with product data - no login required
+    if (product.stock === 0) {
+      toast.error('Stok produk habis');
       return;
     }
-
-    if (user.role !== 'pembeli') {
-      toast.error('Hanya pembeli yang dapat menambahkan produk ke keranjang');
-      return;
-    }
-
-    try {
-      await addToCart({ product_id: product.id, quantity: 1 });
-      toast.success('Produk berhasil ditambahkan ke keranjang!', {
-        position: 'top-right',
-      });
-    } catch {
-      toast.error('Gagal menambahkan produk ke keranjang');
-    }
+    navigate(`/checkout?product_id=${product.id}&quantity=1`);
   };
 
   const categories = [
@@ -136,6 +130,7 @@ const Products = () => {
                   </p>
                   <div className="flex items-center justify-between mb-4">
                     <div>
+                      <p className="text-xs text-gray-500 mb-1">Harga Mulai</p>
                       {product.discount_percentage > 0 ? (
                         <>
                           <span className="text-gray-400 line-through text-sm block">
@@ -160,7 +155,7 @@ const Products = () => {
                       Detail
                     </Link>
                     <button
-                      onClick={() => handleAddToCart(product)}
+                      onClick={() => handleBuyNow(product)}
                       disabled={product.stock === 0}
                       className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition text-sm font-medium disabled:bg-gray-400"
                     >

@@ -42,6 +42,25 @@ export const productAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   delete: (id) => api.delete(`/products/${id}`),
+  
+  // Product Images
+  getImages: (id) => api.get(`/products/${id}/images`),
+  uploadImages: (id, formData) => api.post(`/products/${id}/images`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  deleteImage: (productId, imageId) => api.delete(`/products/${productId}/images/${imageId}`),
+  
+  // Product Variations
+  getVariations: (id) => api.get(`/products/${id}/variations`),
+  addVariation: (id, data) => api.post(`/products/${id}/variations`, data),
+  updateVariation: (productId, variantId, data) => api.put(`/products/${productId}/variations/${variantId}`, data),
+  deleteVariation: (productId, variantId) => api.delete(`/products/${productId}/variations/${variantId}`),
+  
+  // Product Add-ons
+  getAddons: (id) => api.get(`/products/${id}/addons`),
+  addAddon: (id, data) => api.post(`/products/${id}/addons`, data),
+  updateAddon: (productId, addonId, data) => api.put(`/products/${productId}/addons/${addonId}`, data),
+  deleteAddon: (productId, addonId) => api.delete(`/products/${productId}/addons/${addonId}`),
 };
 
 export const orderAPI = {
@@ -60,6 +79,15 @@ export const orderAPI = {
   uploadProof: (id, formData) => api.post(`/orders/${id}/proof`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  createWithProof: (formData) => api.post('/orders', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  createGuest: (formData) => api.post('/orders/guest', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  // Kitchen Checklist
+  getChecklist: (id) => api.get(`/orders/${id}/kitchen-checklist`),
+  saveChecklist: (id, data) => api.post(`/orders/${id}/kitchen-checklist`, data),
 };
 
 export const voucherAPI = {
