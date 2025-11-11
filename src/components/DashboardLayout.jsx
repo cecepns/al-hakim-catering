@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -7,6 +7,12 @@ const DashboardLayout = ({ children, role }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+
+  // Set sidebar open by default on desktop
+  useEffect(() => {
+    const isDesktop = window.innerWidth >= 768;
+    setSidebarOpen(isDesktop);
+  }, []);
 
   const menuItems = {
     admin: [
@@ -60,14 +66,20 @@ const DashboardLayout = ({ children, role }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Sidebar */}
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row">
+      {/* Sidebar - Fixed */}
       <aside
-        className={`${
-          sidebarOpen ? 'w-64' : 'w-20 -left-20'
-        } bg-white shadow-lg fixed top-0 left-0 h-screen transition-all duration-300 z-20 ${
-          sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
-        }`}
+        className={`
+          md:w-64 md:shadow-lg
+          ${
+            sidebarOpen ? 'w-64' : 'w-20 -left-64'
+          } bg-white shadow-lg fixed top-0 left-0 h-screen transition-all duration-300 z-20
+          md:h-screen md:flex-shrink-0
+          ${
+            sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
+          }
+          md:pointer-events-auto
+        `}
       >
         <div className="h-full flex flex-col">
           {/* Logo */}
@@ -76,12 +88,10 @@ const DashboardLayout = ({ children, role }) => {
               <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-lg">AH</span>
               </div>
-              {sidebarOpen && (
-                <div>
-                  <h1 className="text-lg font-bold text-gray-900">Al Hakim</h1>
-                  <p className="text-xs text-gray-600 capitalize">{role}</p>
-                </div>
-              )}
+              <div className={`${sidebarOpen ? 'block' : 'hidden'} md:block`}>
+                <h1 className="text-lg font-bold text-gray-900">Al Hakim</h1>
+                <p className="text-xs text-gray-600 capitalize">{role}</p>
+              </div>
             </Link>
           </div>
 
@@ -112,7 +122,7 @@ const DashboardLayout = ({ children, role }) => {
                     d={item.icon}
                   />
                 </svg>
-                {sidebarOpen && <span>{item.name}</span>}
+                <span className={`${sidebarOpen ? 'inline' : 'hidden'} md:inline`}>{item.name}</span>
               </Link>
             ))}
           </nav>
@@ -125,42 +135,40 @@ const DashboardLayout = ({ children, role }) => {
                   {user?.name?.charAt(0).toUpperCase()}
                 </span>
               </div>
-              {sidebarOpen && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">
-                    {user?.name}
-                  </p>
-                  <p className="text-xs text-gray-600 truncate">{user?.email}</p>
-                </div>
-              )}
+              <div className={`flex-1 min-w-0 ${sidebarOpen ? 'block' : 'hidden'} md:block`}>
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {user?.name}
+                </p>
+                <p className="text-xs text-gray-600 truncate">{user?.email}</p>
+              </div>
             </div>
-            {sidebarOpen && (
-              <button
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"
+            <button
+              onClick={handleLogout}
+              className={`w-full flex items-center justify-center space-x-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition ${
+                sidebarOpen ? 'block' : 'hidden'
+              } md:block`}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                <span>Keluar</span>
-              </button>
-            )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
+              </svg>
+              <span>Keluar</span>
+            </button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="w-full transition-all duration-300">
+      <main className={`flex-1 flex flex-col md:w-0 ${sidebarOpen ? 'md:ml-64' : 'md:ml-0'} transition-all duration-300`}>
         {/* Top Bar */}
         <header className="bg-white shadow-sm sticky top-0 z-40">
           <div className="px-6 py-4 flex items-center justify-between">
@@ -211,7 +219,7 @@ const DashboardLayout = ({ children, role }) => {
         </header>
 
         {/* Page Content */}
-        <div className="p-6">{children}</div>
+        <div className="flex-1 overflow-auto p-6">{children}</div>
       </main>
     </div>
   );
