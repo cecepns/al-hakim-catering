@@ -72,7 +72,7 @@ const DashboardLayout = ({ children, role }) => {
         className={`
           md:w-64 md:shadow-lg
           ${
-            sidebarOpen ? 'w-64' : 'w-20 -left-64'
+            sidebarOpen ? 'w-64' : 'w-20 -left-44 md:-ml-64'
           } bg-white shadow-lg fixed top-0 left-0 h-screen transition-all duration-300 z-20
           md:h-screen md:flex-shrink-0
           ${
@@ -146,7 +146,7 @@ const DashboardLayout = ({ children, role }) => {
               onClick={handleLogout}
               className={`w-full flex items-center justify-center space-x-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition ${
                 sidebarOpen ? 'block' : 'hidden'
-              } md:block`}
+              } md:flex`}
             >
               <svg
                 className="w-5 h-5"
