@@ -110,9 +110,9 @@ const PembeliDashboard = () => {
           </Link>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Pesanan Terbaru</h2>
+        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4 md:mb-6">
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">Pesanan Terbaru</h2>
             <Link to="/pembeli/orders" className="text-primary-600 hover:text-primary-700 font-semibold text-sm">
               Lihat Semua
             </Link>
@@ -129,23 +129,23 @@ const PembeliDashboard = () => {
               </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+            <div className="overflow-x-auto -mx-4 md:mx-0 md:rounded-lg">
+              <table className="w-full min-w-max md:min-w-full">
+                <thead className="bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       ID Pesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Tanggal
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Total
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Aksi
                     </th>
                   </tr>
@@ -153,21 +153,21 @@ const PembeliDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                         #{order.id}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {new Date(order.created_at).toLocaleDateString('id-ID')}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
                         Rp {formatRupiah(order.total_amount)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                      <td className="px-3 md:px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
                         <Link to={`/pembeli/orders/${order.id}`} className="text-primary-600 hover:text-primary-700 font-semibold">
                           Detail
                         </Link>

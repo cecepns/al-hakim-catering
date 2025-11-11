@@ -147,8 +147,8 @@ const KurirDashboard = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Daftar Pengiriman</h2>
+        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+          <h2 className="text-lg md:text-xl font-bold text-gray-900 mb-4 md:mb-6">Daftar Pengiriman</h2>
 
           {orders.length === 0 ? (
             <div className="text-center py-12">
@@ -159,26 +159,26 @@ const KurirDashboard = () => {
               <p className="text-gray-600">Belum ada pesanan yang perlu dikirim</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+            <div className="overflow-x-auto -mx-4 md:mx-0 md:rounded-lg">
+              <table className="w-full min-w-max md:min-w-full">
+                <thead className="bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       ID Pesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Pelanggan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden md:table-cell">
                       Alamat
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Total
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Aksi
                     </th>
                   </tr>
@@ -186,25 +186,25 @@ const KurirDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                         #{order.id}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{order.customer_name}</div>
-                        <div className="text-sm text-gray-600">{order.customer_phone}</div>
+                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
+                        <div className="font-medium text-gray-900">{order.customer_name}</div>
+                        <div className="text-xs text-gray-600">{order.customer_phone}</div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 hidden md:table-cell max-w-xs truncate">
                         {order.delivery_address}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
                         Rp {formatRupiah(order.total_amount)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                      <td className="px-3 md:px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
                         <Link
                           to={`/kurir/orders/${order.id}`}
                           className="text-primary-600 hover:text-primary-700 font-semibold"

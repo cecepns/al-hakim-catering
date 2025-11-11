@@ -193,25 +193,25 @@ const AdminDashboard = () => {
           </Link>
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Produk Terlaris</h2>
+        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
+          <h2 className="text-lg md:text-xl font-bold text-gray-900 mb-4 md:mb-6">Produk Terlaris</h2>
           {topProducts.length === 0 ? (
             <p className="text-gray-600 text-center py-8">Belum ada data produk</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+            <div className="overflow-x-auto -mx-4 md:mx-0 md:rounded-lg">
+              <table className="w-full min-w-max md:min-w-full">
+                <thead className="bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Produk
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Kategori
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Terjual
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Pendapatan
                     </th>
                   </tr>
@@ -219,16 +219,16 @@ const AdminDashboard = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {topProducts.map((product, index) => (
                     <tr key={index}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap max-w-xs truncate">
                         {product.name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {product.category}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {product.sold} unit
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
+                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 font-semibold whitespace-nowrap">
                         Rp {formatRupiah(product.revenue)}
                       </td>
                     </tr>
