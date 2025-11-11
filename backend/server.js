@@ -279,6 +279,30 @@ app.post('/api/products', authenticateToken, authorizeRole('admin'), upload.sing
   }
 });
 
+// Helper function to get unused images
+const getUnusedImages = async (productId) => {
+  const [allProductImages] = await pool.query(
+    'SELECT media_url FROM product_images WHERE product_id = ?',
+    [productId]
+  );
+  
+  const imageUrls = allProductImages.map(img => img.media_url);
+  return imageUrls;
+};
+
+// Helper function to delete image files from disk
+const deleteImageFiles = (imageUrls) => {
+  imageUrls.forEach(imageUrl => {
+    if (imageUrl) {
+      const filePath = path.join(__dirname, imageUrl.replace(/^\//, ''));
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log('Image deleted:', filePath);
+      }
+    }
+  });
+};
+
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.single('image'), async (req, res) => {
   try {
     const { name, description, category, price, discount_percentage, is_promo, stock } = req.body;
@@ -329,7 +353,11 @@ app.delete('/api/products/:id', authenticateToken, authorizeRole('admin'), async
       }
     }
 
-    // Delete the product from database
+    // Get all product images and delete them
+    const unusedImages = await getUnusedImages(req.params.id);
+    deleteImageFiles(unusedImages);
+
+    // Delete the product from database (cascades to all related records)
     await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
     res.json({ message: 'Produk berhasil dihapus' });
   } catch (error) {
@@ -418,20 +446,39 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/orders', authenticateToken, async (req, res) => {
+// Guest Order Endpoint (No authentication required)
+app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) => {
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const {
-      items,
-      voucher_code,
-      cashback_used,
-      payment_method,
-      delivery_address,
-      delivery_notes
-    } = req.body;
+    // Get or create guest user
+    let [guestUsers] = await connection.query('SELECT id FROM users WHERE email = ? AND role = ?', ['guest@alhakim.com', 'pembeli']);
+    let guestUserId;
+
+    if (guestUsers.length === 0) {
+      const [result] = await connection.query(
+        'INSERT INTO users (name, email, password, phone, address, role) VALUES (?, ?, ?, ?, ?, ?)',
+        ['Guest User', 'guest@alhakim.com', 'guest', '0000000000', '-', 'pembeli']
+      );
+      guestUserId = result.insertId;
+    } else {
+      guestUserId = guestUsers[0].id;
+    }
+
+    const items = JSON.parse(req.body.items);
+    const delivery_address = req.body.delivery_address || '-';
+    const delivery_notes = req.body.delivery_notes || '';
+    const payment_method = req.body.payment_method || 'transfer';
+
+    // Parse delivery_notes JSON untuk extract data ke kolom terpisah
+    let guestData = {};
+    try {
+      guestData = typeof delivery_notes === 'string' ? JSON.parse(delivery_notes) : delivery_notes;
+    } catch (e) {
+      console.error('Error parsing delivery_notes:', e);
+    }
 
     let total_amount = 0;
     const orderItems = [];
@@ -444,7 +491,172 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       }
 
       const product = products[0];
-      const price = product.discounted_price || product.price;
+      let price = product.discounted_price || product.price;
+      
+      // Add variant price adjustment if variant is selected
+      if (item.variant_id) {
+        const [variants] = await connection.query('SELECT price_adjustment FROM product_variants WHERE id = ? AND product_id = ?', [item.variant_id, item.product_id]);
+        if (variants.length > 0) {
+          price += variants[0].price_adjustment;
+        }
+      }
+      
+      const subtotal = price * item.quantity;
+      total_amount += subtotal;
+
+      orderItems.push({
+        product_id: item.product_id,
+        variant_id: item.variant_id || null,
+        product_name: product.name,
+        variant_name: item.variant_name || null,
+        quantity: item.quantity,
+        price: price,
+        subtotal: subtotal
+      });
+    }
+
+    const final_amount = total_amount;
+
+    // Parse event_date dan event_time untuk kolom terpisah
+    let eventDate = null;
+    let eventTime = null;
+    if (guestData.event_date) {
+      eventDate = guestData.event_date;
+    }
+    if (guestData.event_time) {
+      eventTime = guestData.event_time;
+    }
+
+    const [orderResult] = await connection.query(
+      `INSERT INTO orders (
+        user_id, total_amount, discount_amount, cashback_used, final_amount, 
+        payment_method, delivery_address, delivery_notes,
+        guest_customer_name, guest_wa_number_1, guest_wa_number_2,
+        guest_reference, guest_reference_detail,
+        guest_event_name, guest_event_date, guest_event_time,
+        guest_sharelok_link, guest_landmark, guest_delivery_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        guestUserId, total_amount, 0, 0, final_amount, 
+        payment_method, delivery_address, delivery_notes,
+        guestData.customer_name || null,
+        guestData.wa_number_1 || null,
+        guestData.wa_number_2 || null,
+        guestData.reference || null,
+        guestData.reference_detail || null,
+        guestData.event_name || null,
+        eventDate,
+        eventTime,
+        guestData.sharelok_link || null,
+        guestData.landmark || null,
+        guestData.delivery_type || null
+      ]
+    );
+
+    const orderId = orderResult.insertId;
+
+    for (const item of orderItems) {
+      await connection.query(
+        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal]
+      );
+
+      await connection.query(
+        'UPDATE products SET sold_count = sold_count + ?, stock = stock - ? WHERE id = ?',
+        [item.quantity, item.quantity, item.product_id]
+      );
+    }
+
+    // Upload payment proof if exists
+    let proofImageUrl = null;
+    if (req.file) {
+      proofImageUrl = `/uploads/${req.file.filename}`;
+      await connection.query(
+        'INSERT INTO order_status_logs (order_id, status, handler_name, notes, proof_image_url) VALUES (?, ?, ?, ?, ?)',
+        [orderId, 'dibuat', 'Guest', 'Pesanan dibuat oleh guest', proofImageUrl]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO order_status_logs (order_id, status, handler_name, notes) VALUES (?, ?, ?, ?)',
+        [orderId, 'dibuat', 'Guest', 'Pesanan dibuat oleh guest']
+      );
+    }
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Pesanan berhasil dibuat',
+      orderId: orderId
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create guest order error:', error);
+    res.status(500).json({ message: error.message || 'Terjadi kesalahan' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Handle both JSON and FormData
+    let items, voucher_code, cashback_used, payment_method, delivery_address, delivery_notes;
+    
+    // Check if request is FormData (items will be a JSON string) or JSON (items will be an array)
+    if (req.body.items && typeof req.body.items === 'string') {
+      // FormData - parse JSON strings
+      items = JSON.parse(req.body.items);
+      voucher_code = req.body.voucher_code && req.body.voucher_code !== '' ? req.body.voucher_code : null;
+      cashback_used = req.body.cashback_used ? parseFloat(req.body.cashback_used) : 0;
+      payment_method = req.body.payment_method || 'transfer';
+      delivery_address = req.body.delivery_address || '-';
+      delivery_notes = req.body.delivery_notes || '';
+    } else {
+      // JSON format
+      items = req.body.items;
+      voucher_code = req.body.voucher_code || null;
+      cashback_used = req.body.cashback_used || 0;
+      payment_method = req.body.payment_method;
+      delivery_address = req.body.delivery_address;
+      delivery_notes = req.body.delivery_notes || '';
+    }
+
+    // Parse delivery_notes JSON if exists (for guest-like format)
+    let guestData = {};
+    if (delivery_notes) {
+      try {
+        guestData = typeof delivery_notes === 'string' ? JSON.parse(delivery_notes) : delivery_notes;
+      } catch (e) {
+        // If not JSON, treat as plain text
+        guestData = {};
+      }
+    }
+
+    let total_amount = 0;
+    const orderItems = [];
+
+    for (const item of items) {
+      const [products] = await connection.query('SELECT * FROM products WHERE id = ?', [item.product_id]);
+
+      if (products.length === 0) {
+        throw new Error('Produk tidak ditemukan');
+      }
+
+      const product = products[0];
+      let price = product.discounted_price || product.price;
+      
+      // Add variant price adjustment if variant is selected
+      if (item.variant_id) {
+        const [variants] = await connection.query('SELECT price_adjustment FROM product_variants WHERE id = ? AND product_id = ?', [item.variant_id, item.product_id]);
+        if (variants.length > 0) {
+          price += variants[0].price_adjustment;
+        }
+      }
+      
       const subtotal = price * item.quantity;
       total_amount += subtotal;
 
@@ -493,9 +705,46 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
 
     const final_amount = total_amount - discount_amount - (cashback_used || 0);
 
+    // Parse event_date dan event_time untuk kolom terpisah (if guestData exists)
+    let eventDate = null;
+    let eventTime = null;
+    if (guestData.event_date) {
+      eventDate = guestData.event_date;
+    }
+    if (guestData.event_time) {
+      eventTime = guestData.event_time;
+    }
+
+    // Build delivery_notes as JSON string
+    // If delivery_notes is already a JSON string, use it; otherwise stringify guestData
+    const deliveryNotesJson = (delivery_notes && typeof delivery_notes === 'string' && delivery_notes.trim().startsWith('{')) 
+      ? delivery_notes 
+      : (Object.keys(guestData).length > 0 ? JSON.stringify(guestData) : (delivery_notes || ''));
+
     const [orderResult] = await connection.query(
-      'INSERT INTO orders (user_id, voucher_id, total_amount, discount_amount, cashback_used, final_amount, payment_method, delivery_address, delivery_notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [req.user.id, voucher_id, total_amount, discount_amount, cashback_used || 0, final_amount, payment_method, delivery_address, delivery_notes]
+      `INSERT INTO orders (
+        user_id, voucher_id, total_amount, discount_amount, cashback_used, final_amount, 
+        payment_method, delivery_address, delivery_notes,
+        guest_customer_name, guest_wa_number_1, guest_wa_number_2,
+        guest_reference, guest_reference_detail,
+        guest_event_name, guest_event_date, guest_event_time,
+        guest_sharelok_link, guest_landmark, guest_delivery_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id, voucher_id, total_amount, discount_amount, cashback_used || 0, final_amount,
+        payment_method, delivery_address, deliveryNotesJson,
+        guestData.customer_name || null,
+        guestData.wa_number_1 || null,
+        guestData.wa_number_2 || null,
+        guestData.reference || null,
+        guestData.reference_detail || null,
+        guestData.event_name || null,
+        eventDate,
+        eventTime,
+        guestData.sharelok_link || null,
+        guestData.landmark || null,
+        guestData.delivery_type || null
+      ]
     );
 
     const orderId = orderResult.insertId;
@@ -535,10 +784,20 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       [req.user.id, orderId, cashback_earned, 'earned', 'Cashback dari pesanan #' + orderId]
     );
 
-    await connection.query(
-      'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
-      [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
-    );
+    // Upload payment proof if exists (from FormData)
+    let proofImageUrl = null;
+    if (req.file) {
+      proofImageUrl = `/uploads/${req.file.filename}`;
+      await connection.query(
+        'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes, proof_image_url) VALUES (?, ?, ?, ?, ?, ?)',
+        [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat dengan bukti pembayaran', proofImageUrl]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
+        [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
+      );
+    }
 
     await connection.commit();
 
@@ -607,6 +866,226 @@ app.post('/api/orders/:id/complaint', authenticateToken, upload.single('image'),
     res.status(201).json({ message: 'Komplain berhasil diajukan' });
   } catch (error) {
     console.error('Add complaint error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// ========================================
+// PRODUCT IMAGES ENDPOINTS
+// ========================================
+app.post('/api/products/:id/images', authenticateToken, authorizeRole('admin'), upload.array('images'), async (req, res) => {
+  try {
+    const { is_primary } = req.body;
+    const productId = req.params.id;
+
+    // Check if product exists
+    const [products] = await pool.query('SELECT id FROM products WHERE id = ?', [productId]);
+    if (products.length === 0) {
+      return res.status(404).json({ message: 'Produk tidak ditemukan' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'Tidak ada file yang diupload' });
+    }
+
+    const insertedImages = [];
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const mediaUrl = `/uploads/${file.filename}`;
+      const isPrimary = is_primary && i === 0;
+
+      const [result] = await pool.query(
+        'INSERT INTO product_images (product_id, media_url, media_type, is_primary, display_order) VALUES (?, ?, ?, ?, ?)',
+        [productId, mediaUrl, 'image', isPrimary, i]
+      );
+
+      insertedImages.push({ id: result.insertId, media_url: mediaUrl });
+    }
+
+    res.status(201).json({ message: 'Gambar berhasil ditambahkan', images: insertedImages });
+  } catch (error) {
+    console.error('Upload product images error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.get('/api/products/:id/images', async (req, res) => {
+  try {
+    const [images] = await pool.query(
+      'SELECT * FROM product_images WHERE product_id = ? ORDER BY display_order',
+      [req.params.id]
+    );
+    res.json(images);
+  } catch (error) {
+    console.error('Get product images error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.delete('/api/products/:id/images/:imageId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const [images] = await pool.query(
+      'SELECT media_url FROM product_images WHERE id = ? AND product_id = ?',
+      [req.params.imageId, req.params.id]
+    );
+
+    if (images.length === 0) {
+      return res.status(404).json({ message: 'Gambar tidak ditemukan' });
+    }
+
+    // Delete file from disk
+    const filePath = path.join(__dirname, images[0].media_url.replace(/^\//, ''));
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('Product image deleted:', filePath);
+    }
+
+    // Delete from database
+    await pool.query('DELETE FROM product_images WHERE id = ?', [req.params.imageId]);
+    res.json({ message: 'Gambar berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete product image error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// ========================================
+// PRODUCT VARIATIONS ENDPOINTS
+// ========================================
+app.post('/api/products/:id/variations', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { name, price_adjustment, stock } = req.body;
+
+    const [result] = await pool.query(
+      'INSERT INTO product_variants (product_id, name, price_adjustment, stock) VALUES (?, ?, ?, ?)',
+      [req.params.id, name, price_adjustment || 0, stock || 0]
+    );
+
+    res.status(201).json({ message: 'Variasi berhasil ditambahkan', id: result.insertId });
+  } catch (error) {
+    console.error('Create product variation error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.get('/api/products/:id/variations', async (req, res) => {
+  try {
+    const [variations] = await pool.query(
+      'SELECT * FROM product_variants WHERE product_id = ? AND is_active = TRUE',
+      [req.params.id]
+    );
+    res.json(variations);
+  } catch (error) {
+    console.error('Get product variations error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.put('/api/products/:id/variations/:variantId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { name, price_adjustment, stock, description, is_active } = req.body;
+
+    await pool.query(
+      'UPDATE product_variants SET name = ?, price_adjustment = ?, stock = ?, description = ?, is_active = ? WHERE id = ? AND product_id = ?',
+      [name, price_adjustment || 0, stock || 0, description || null, is_active !== false, req.params.variantId, req.params.id]
+    );
+
+    res.json({ message: 'Variasi berhasil diupdate' });
+  } catch (error) {
+    console.error('Update product variation error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.delete('/api/products/:id/variations/:variantId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    // Get variant images
+    const [variantImages] = await pool.query(
+      'SELECT image_url FROM product_variant_images WHERE variant_id = ?',
+      [req.params.variantId]
+    );
+
+    // Delete variant image files
+    variantImages.forEach(img => {
+      if (img.image_url) {
+        const filePath = path.join(__dirname, img.image_url.replace(/^\//, ''));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    });
+
+    // Delete variant from database (cascades to variant images)
+    await pool.query(
+      'DELETE FROM product_variants WHERE id = ? AND product_id = ?',
+      [req.params.variantId, req.params.id]
+    );
+
+    res.json({ message: 'Variasi berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete product variation error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// ========================================
+// PRODUCT ADD-ONS ENDPOINTS
+// ========================================
+app.post('/api/products/:id/addons', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { name, description, price, max_quantity } = req.body;
+
+    const [result] = await pool.query(
+      'INSERT INTO product_addons (product_id, name, description, price, max_quantity) VALUES (?, ?, ?, ?, ?)',
+      [req.params.id, name, description || null, price, max_quantity || 0]
+    );
+
+    res.status(201).json({ message: 'Add-on berhasil ditambahkan', id: result.insertId });
+  } catch (error) {
+    console.error('Create product addon error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.get('/api/products/:id/addons', async (req, res) => {
+  try {
+    const [addons] = await pool.query(
+      'SELECT * FROM product_addons WHERE product_id = ? AND is_active = TRUE',
+      [req.params.id]
+    );
+    res.json(addons);
+  } catch (error) {
+    console.error('Get product addons error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.put('/api/products/:id/addons/:addonId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { name, description, price, max_quantity, is_active } = req.body;
+
+    await pool.query(
+      'UPDATE product_addons SET name = ?, description = ?, price = ?, max_quantity = ?, is_active = ? WHERE id = ? AND product_id = ?',
+      [name, description || null, price, max_quantity || 0, is_active !== false, req.params.addonId, req.params.id]
+    );
+
+    res.json({ message: 'Add-on berhasil diupdate' });
+  } catch (error) {
+    console.error('Update product addon error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.delete('/api/products/:id/addons/:addonId', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM product_addons WHERE id = ? AND product_id = ?',
+      [req.params.addonId, req.params.id]
+    );
+
+    res.json({ message: 'Add-on berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete product addon error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
