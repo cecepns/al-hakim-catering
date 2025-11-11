@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const DashboardLayout = ({ children, role }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -60,12 +60,14 @@ const DashboardLayout = ({ children, role }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
       <aside
         className={`${
-          sidebarOpen ? 'w-64' : 'w-20'
-        } bg-white shadow-lg transition-all duration-300 fixed h-screen z-30`}
+          sidebarOpen ? 'w-64' : 'w-20 -left-20'
+        } bg-white shadow-lg fixed top-0 left-0 h-screen transition-all duration-300 z-20 ${
+          sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
+        }`}
       >
         <div className="h-full flex flex-col">
           {/* Logo */}
@@ -155,42 +157,39 @@ const DashboardLayout = ({ children, role }) => {
             )}
           </div>
         </div>
-
-        {/* Toggle Button */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute -right-3 top-8 w-6 h-6 bg-primary-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-primary-700 transition"
-        >
-          <svg
-            className={`w-4 h-4 transition-transform ${
-              sidebarOpen ? '' : 'rotate-180'
-            }`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
       </aside>
 
       {/* Main Content */}
-      <main
-        className={`flex-1 ${
-          sidebarOpen ? 'ml-64' : 'ml-20'
-        } transition-all duration-300`}
-      >
+      <main className="w-full transition-all duration-300">
         {/* Top Bar */}
-        <header className="bg-white shadow-sm sticky top-0 z-20">
+        <header className="bg-white shadow-sm sticky top-0 z-40">
           <div className="px-6 py-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">
-              {currentMenu.find((item) => isActive(item.path))?.name || 'Dashboard'}
-            </h2>
+            <div className="flex items-center space-x-4">
+              {/* Toggle Sidebar */}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
+              >
+                <svg
+                  className={`w-6 h-6 transition-transform ${
+                    sidebarOpen ? '' : 'rotate-180'
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </button>
+              <h2 className="text-xl font-semibold text-gray-900">
+                {currentMenu.find((item) => isActive(item.path))?.name || 'Dashboard'}
+              </h2>
+            </div>
             <div className="flex items-center space-x-4">
               {/* Back to Home */}
               <Link
