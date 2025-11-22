@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { productAPI } from '../../utils/api';
+import { productAPI, authAPI } from '../../utils/api';
 import { getImageUrl } from '../../utils/imageHelper';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -8,9 +8,22 @@ const MarketingPricing = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [commissionPercentage, setCommissionPercentage] = useState(0);
+
+  const fetchUserProfile = async () => {
+    try {
+      const response = await authAPI.getProfile();
+      const commission = response.data?.commission_percentage || 0;
+      setCommissionPercentage(parseFloat(commission) || 0);
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
+    }
+  };
 
   useEffect(() => {
     fetchProducts();
+    fetchUserProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const fetchProducts = async () => {
@@ -28,7 +41,7 @@ const MarketingPricing = () => {
             // Use first image if available, otherwise use product.image_url
             const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
             return { ...product, image_url: displayImage };
-          } catch (error) {
+          } catch {
             // If images fetch fails, keep the original image_url
             return product;
           }
@@ -129,45 +142,62 @@ const MarketingPricing = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Kategori
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Komisi
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {products.map((product) => (
-                    <tr key={product.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <img
-                            src={getImageUrl(product.image_url)}
-                            alt={product.name}
-                            className="w-12 h-12 rounded-lg object-cover"
-                          />
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {product.name}
+                  {products.map((product) => {
+                    const productPrice = product.discounted_price || product.price;
+                    const commissionAmount = (productPrice * commissionPercentage) / 100;
+                    return (
+                      <tr key={product.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <img
+                              src={getImageUrl(product.image_url)}
+                              alt={product.name}
+                              className="w-12 h-12 rounded-lg object-cover"
+                            />
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">
+                                {product.name}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-semibold text-gray-900">
-                          Rp {formatRupiah(product.discounted_price || product.price)}
-                        </div>
-                        {product.discount_percentage > 0 && (
-                          <div className="text-xs text-gray-400 line-through">
-                            Rp {formatRupiah(product.price)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-gray-900">
+                            Rp {formatRupiah(productPrice)}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {product.stock}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-500">{product.category}</div>
-                      </td>
-                    </tr>
-                  ))}
+                          {product.discount_percentage > 0 && (
+                            <div className="text-xs text-gray-400 line-through">
+                              Rp {formatRupiah(product.price)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">
+                            {product.stock}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">{product.category}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-green-600">
+                            Rp {formatRupiah(commissionAmount)}
+                          </div>
+                          {commissionPercentage > 0 && (
+                            <div className="text-xs text-gray-500">
+                              ({commissionPercentage}%)
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

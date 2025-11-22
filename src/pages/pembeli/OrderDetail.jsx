@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
+import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 
@@ -12,10 +13,26 @@ const PembeliOrderDetail = () => {
   const [loading, setLoading] = useState(true);
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [review, setReview] = useState(null);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewForm, setReviewForm] = useState({
+    rating: 0,
+    comment: '',
+    image: null,
+    imagePreview: null
+  });
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
     fetchOrder();
   }, [id]);
+
+  useEffect(() => {
+    if (order) {
+      fetchReview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order]);
 
   const fetchOrder = async () => {
     try {
@@ -27,6 +44,84 @@ const PembeliOrderDetail = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchReview = async () => {
+    try {
+      const response = await orderAPI.getReview(id);
+      setReview(response.data);
+      setShowReviewForm(false);
+    } catch (error) {
+      // Review doesn't exist yet, which is fine
+      if (error.response?.status !== 404) {
+        console.error('Error fetching review:', error);
+      } else {
+        // If order is completed and no review exists, show form
+        if (order?.status === 'selesai') {
+          setShowReviewForm(true);
+        }
+      }
+    }
+  };
+
+  const handleStarClick = (rating) => {
+    setReviewForm({ ...reviewForm, rating });
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setReviewForm({
+        ...reviewForm,
+        image: file,
+        imagePreview: URL.createObjectURL(file)
+      });
+    }
+  };
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    
+    if (reviewForm.rating === 0) {
+      alert('Silakan beri rating terlebih dahulu');
+      return;
+    }
+
+    try {
+      setSubmittingReview(true);
+      const formData = new FormData();
+      formData.append('rating', reviewForm.rating);
+      formData.append('comment', reviewForm.comment);
+      if (reviewForm.image) {
+        formData.append('image', reviewForm.image);
+      }
+
+      await orderAPI.addReview(id, formData);
+      alert('Review berhasil dikirim!');
+      setShowReviewForm(false);
+      fetchReview();
+      fetchOrder();
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      alert(error.response?.data?.message || 'Gagal mengirim review');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
+  const getRatingStars = (rating) => {
+    return Array.from({ length: 5 }, (_, i) => (
+      <svg
+        key={i}
+        className={`w-6 h-6 ${
+          i < rating ? 'text-yellow-400' : 'text-gray-300'
+        }`}
+        fill="currentColor"
+        viewBox="0 0 20 20"
+      >
+        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+      </svg>
+    ));
   };
 
   const getStatusColor = (status) => {
@@ -143,7 +238,7 @@ const PembeliOrderDetail = () => {
         </div>
 
         {order.statusLogs && order.statusLogs.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6">
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Riwayat Pesanan</h2>
             <div className="space-y-4">
               {order.statusLogs.map((log, index) => (
@@ -178,6 +273,126 @@ const PembeliOrderDetail = () => {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Review Section */}
+        {order.status === 'selesai' && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Review Pesanan</h2>
+            
+            {review ? (
+              <div className="space-y-4">
+                <div className="flex items-center space-x-1 mb-3">
+                  {getRatingStars(review.rating)}
+                </div>
+                {review.comment && (
+                  <p className="text-gray-700 mb-3">{review.comment}</p>
+                )}
+                {review.image_url && (
+                  <div className="mb-3">
+                    <img
+                      src={getImageUrl(review.image_url)}
+                      alt="Review"
+                      className="w-48 h-48 object-cover rounded-lg cursor-pointer"
+                      onClick={() => {
+                        setViewingImage(getImageUrl(review.image_url));
+                        setImageViewerOpen(true);
+                      }}
+                    />
+                  </div>
+                )}
+                <p className="text-sm text-gray-500">
+                  Review diberikan pada {new Date(review.created_at).toLocaleString('id-ID')}
+                </p>
+              </div>
+            ) : showReviewForm ? (
+              <form onSubmit={handleSubmitReview} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Penilaian Bintang *
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => handleStarClick(star)}
+                        className="focus:outline-none"
+                      >
+                        <svg
+                          className={`w-8 h-8 ${
+                            star <= reviewForm.rating ? 'text-yellow-400' : 'text-gray-300'
+                          }`}
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kritik/Saran
+                  </label>
+                  <textarea
+                    value={reviewForm.comment}
+                    onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    placeholder="Bagikan pengalaman Anda dengan pesanan ini..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Foto (Opsional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  />
+                  {reviewForm.imagePreview && (
+                    <div className="mt-2">
+                      <img
+                        src={reviewForm.imagePreview}
+                        alt="Preview"
+                        className="w-32 h-32 object-cover rounded-lg"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowReviewForm(false)}
+                    className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingReview || reviewForm.rating === 0}
+                    className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submittingReview ? 'Mengirim...' : 'Kirim Review'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowReviewForm(true)}
+                className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Beri Review
+              </button>
+            )}
           </div>
         )}
 

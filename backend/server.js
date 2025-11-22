@@ -142,7 +142,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const [users] = await pool.query(
-      'SELECT id, name, email, phone, address, role, cashback_balance FROM users WHERE id = ?',
+      'SELECT id, name, email, phone, address, role, cashback_balance, commission_percentage FROM users WHERE id = ?',
       [req.user.id]
     );
 
@@ -264,12 +264,12 @@ app.get('/api/products/:id', async (req, res) => {
 
 app.post('/api/products', authenticateToken, authorizeRole('admin'), upload.single('image'), async (req, res) => {
   try {
-    const { name, description, category, price, discount_percentage, is_promo, stock } = req.body;
+    const { name, description, category, price, discount_percentage, is_promo, stock, commission_percentage } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     const [result] = await pool.query(
-      'INSERT INTO products (name, description, category, price, discount_percentage, is_promo, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url]
+      'INSERT INTO products (name, description, category, price, discount_percentage, is_promo, stock, image_url, commission_percentage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url, commission_percentage || 0]
     );
 
     res.status(201).json({ message: 'Produk berhasil ditambahkan', id: result.insertId });
@@ -305,7 +305,7 @@ const deleteImageFiles = (imageUrls) => {
 
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.single('image'), async (req, res) => {
   try {
-    const { name, description, category, price, discount_percentage, is_promo, stock } = req.body;
+    const { name, description, category, price, discount_percentage, is_promo, stock, commission_percentage } = req.body;
     let image_url = req.body.existing_image;
 
     // If new image is uploaded, delete the old one
@@ -327,8 +327,8 @@ app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.s
     }
 
     await pool.query(
-      'UPDATE products SET name = ?, description = ?, category = ?, price = ?, discount_percentage = ?, is_promo = ?, stock = ?, image_url = ? WHERE id = ?',
-      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url, req.params.id]
+      'UPDATE products SET name = ?, description = ?, category = ?, price = ?, discount_percentage = ?, is_promo = ?, stock = ?, image_url = ?, commission_percentage = ? WHERE id = ?',
+      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url, commission_percentage || 0, req.params.id]
     );
 
     res.json({ message: 'Produk berhasil diupdate' });
@@ -396,7 +396,8 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
       }
     }
 
-    query += ' ORDER BY o.created_at DESC';
+    // Order by: pinned first, then by created_at DESC
+    query += ' ORDER BY o.is_pinned DESC, o.created_at DESC';
 
     if (req.query.limit) {
       query += ' LIMIT ?';
@@ -908,6 +909,11 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       proof_image_url = `/uploads/${req.files.proof_delivery[0].filename}`;
     }
 
+    // Get current order status before update
+    const [currentOrders] = await pool.query('SELECT status, final_amount FROM orders WHERE id = ?', [req.params.id]);
+    const currentStatus = currentOrders.length > 0 ? currentOrders[0].status : null;
+    const orderAmount = currentOrders.length > 0 ? currentOrders[0].final_amount : 0;
+
     await pool.query('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
 
     const [users] = await pool.query('SELECT name FROM users WHERE id = ?', [req.user.id]);
@@ -918,9 +924,86 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       [req.params.id, status, req.user.id, handlerName, notes, proof_image_url]
     );
 
+    // Auto-create income entry when order status changes to 'selesai'
+    if (status === 'selesai' && currentStatus !== 'selesai') {
+      // Check if income entry already exists for this order
+      const [existingIncome] = await pool.query(
+        'SELECT id FROM cash_flow_transactions WHERE order_id = ? AND type = ?',
+        [req.params.id, 'income']
+      );
+
+      if (existingIncome.length === 0) {
+        await pool.query(
+          'INSERT INTO cash_flow_transactions (type, amount, description, order_id, created_by) VALUES (?, ?, ?, ?, ?)',
+          [
+            'income',
+            orderAmount,
+            `Pemasukan dari pesanan #${req.params.id}`,
+            req.params.id,
+            req.user.id
+          ]
+        );
+      }
+    }
+
     res.json({ message: 'Status pesanan berhasil diupdate' });
   } catch (error) {
     console.error('Update order status error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Pin/Unpin order
+app.put('/api/orders/:id/pin', authenticateToken, async (req, res) => {
+  try {
+    const { is_pinned } = req.body;
+    const orderId = req.params.id;
+    const userId = req.user.id;
+
+    // Check if order exists
+    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    // Convert to boolean if needed
+    const shouldPin = is_pinned === true || is_pinned === 1 || is_pinned === 'true' || is_pinned === '1';
+
+    if (shouldPin) {
+      // Pin the order
+      await pool.query(
+        'UPDATE orders SET is_pinned = 1, pinned_by = ?, pinned_at = NOW() WHERE id = ?',
+        [userId, orderId]
+      );
+      res.json({ message: 'Pesanan berhasil disematkan' });
+    } else {
+      // Unpin the order
+      await pool.query(
+        'UPDATE orders SET is_pinned = 0, pinned_by = NULL, pinned_at = NULL WHERE id = ?',
+        [orderId]
+      );
+      res.json({ message: 'Pesanan berhasil dibatalkan sematkan' });
+    }
+  } catch (error) {
+    console.error('Pin/unpin order error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.get('/api/orders/:id/review', authenticateToken, async (req, res) => {
+  try {
+    const [reviews] = await pool.query(
+      'SELECT * FROM reviews WHERE order_id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (reviews.length === 0) {
+      return res.status(404).json({ message: 'Review tidak ditemukan' });
+    }
+
+    res.json(reviews[0]);
+  } catch (error) {
+    console.error('Get review error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
@@ -930,14 +1013,106 @@ app.post('/api/orders/:id/review', authenticateToken, upload.single('image'), as
     const { rating, comment } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : null;
 
+    // Check if review already exists
+    const [existing] = await pool.query(
+      'SELECT id FROM reviews WHERE order_id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (existing.length > 0) {
+      return res.status(400).json({ message: 'Review untuk pesanan ini sudah ada' });
+    }
+
     await pool.query(
-      'INSERT INTO reviews (order_id, user_id, rating, comment, image_url) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO reviews (order_id, user_id, rating, comment, image_url, resolved) VALUES (?, ?, ?, ?, ?, 0)',
       [req.params.id, req.user.id, rating, comment, image_url]
     );
 
     res.status(201).json({ message: 'Review berhasil ditambahkan' });
   } catch (error) {
     console.error('Add review error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Get all reviews and complaints for admin
+app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { type, status } = req.query;
+    
+    let reviews = [];
+    let complaints = [];
+
+    // Get reviews
+    if (!type || type === 'all' || type === 'review') {
+      const [reviewResults] = await pool.query(
+        `SELECT r.*, u.name as customer_name, u.email as customer_email, o.id as order_id
+         FROM reviews r
+         JOIN users u ON r.user_id = u.id
+         JOIN orders o ON r.order_id = o.id
+         ORDER BY r.created_at DESC`
+      );
+      reviews = reviewResults.map(r => ({
+        ...r,
+        type: 'review',
+        resolved: r.resolved || 0
+      }));
+    }
+
+    // Get complaints
+    if (!type || type === 'all' || type === 'complain') {
+      const [complaintResults] = await pool.query(
+        `SELECT c.*, u.name as customer_name, u.email as customer_email, o.id as order_id
+         FROM complaints c
+         JOIN users u ON c.user_id = u.id
+         JOIN orders o ON c.order_id = o.id
+         ORDER BY c.created_at DESC`
+      );
+      complaints = complaintResults.map(c => ({
+        ...c,
+        type: 'complain',
+        comment: c.description,
+        rating: null,
+        resolved: c.status === 'resolved' ? 1 : 0
+      }));
+    }
+
+    // Combine and filter
+    let combined = [...reviews, ...complaints];
+    
+    if (status === 'resolved') {
+      combined = combined.filter(r => r.resolved === 1);
+    } else if (status === 'pending') {
+      combined = combined.filter(r => r.resolved === 0);
+    }
+
+    res.json(combined);
+  } catch (error) {
+    console.error('Get reviews error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Resolve review or complaint
+app.put('/api/reviews/:id/resolve', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { type } = req.body; // 'review' or 'complain'
+
+    if (type === 'complain') {
+      await pool.query(
+        'UPDATE complaints SET status = ? WHERE id = ?',
+        ['resolved', req.params.id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE reviews SET resolved = 1 WHERE id = ?',
+        [req.params.id]
+      );
+    }
+
+    res.json({ message: 'Review berhasil ditandai sebagai selesai' });
+  } catch (error) {
+    console.error('Resolve review error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
@@ -1394,6 +1569,111 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
   }
 });
 
+// Commission withdrawal - Marketing
+app.post('/api/commission/withdraw', authenticateToken, authorizeRole('marketing'), async (req, res) => {
+  try {
+    const { amount, bank_name, account_number, account_name } = req.body;
+    
+    if (!amount || !bank_name || !account_number || !account_name) {
+      return res.status(400).json({ message: 'Semua field harus diisi' });
+    }
+
+    const withdrawalAmount = parseFloat(amount);
+    if (withdrawalAmount < 50000) {
+      return res.status(400).json({ message: 'Minimal penarikan adalah Rp 50.000' });
+    }
+
+    // Check balance
+    const [balanceResult] = await pool.query(
+      `SELECT SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as balance
+       FROM commissions
+       WHERE marketing_id = ?`,
+      [req.user.id]
+    );
+
+    const balance = balanceResult[0]?.balance || 0;
+    if (withdrawalAmount > balance) {
+      return res.status(400).json({ message: 'Saldo tidak mencukupi' });
+    }
+
+    // Check pending withdrawals
+    const [pendingResult] = await pool.query(
+      `SELECT SUM(amount) as pending_amount
+       FROM commission_withdrawals
+       WHERE marketing_id = ? AND status = 'pending'`,
+      [req.user.id]
+    );
+
+    const pendingAmount = pendingResult[0]?.pending_amount || 0;
+    if (withdrawalAmount > (balance - pendingAmount)) {
+      return res.status(400).json({ message: 'Ada penarikan yang masih pending' });
+    }
+
+    // Create withdrawal request
+    await pool.query(
+      `INSERT INTO commission_withdrawals (marketing_id, amount, bank_name, account_number, account_name, status)
+       VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [req.user.id, withdrawalAmount, bank_name, account_number, account_name]
+    );
+
+    res.json({ message: 'Permintaan penarikan berhasil diajukan' });
+  } catch (error) {
+    console.error('Commission withdraw error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Get withdrawal requests - Admin
+app.get('/api/admin/commission-withdrawals', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = `
+      SELECT w.*, u.name as marketing_name, u.email as marketing_email
+      FROM commission_withdrawals w
+      JOIN users u ON w.marketing_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      query += ' AND w.status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY w.created_at DESC';
+
+    const [withdrawals] = await pool.query(query, params);
+    res.json(withdrawals);
+  } catch (error) {
+    console.error('Get withdrawal requests error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Update withdrawal status - Admin
+app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, admin_notes } = req.body;
+
+    if (!['pending', 'approved', 'rejected', 'completed'].includes(status)) {
+      return res.status(400).json({ message: 'Status tidak valid' });
+    }
+
+    await pool.query(
+      `UPDATE commission_withdrawals
+       SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW()
+       WHERE id = ?`,
+      [status, admin_notes || null, req.user.id, id]
+    );
+
+    res.json({ message: 'Status penarikan berhasil diupdate' });
+  } catch (error) {
+    console.error('Update withdrawal status error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
 app.get('/api/stats/dashboard', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const [todaySales] = await pool.query(
@@ -1710,8 +1990,456 @@ app.post('/api/operasional/checklist/:date', authenticateToken, async (req, res)
   }
 });
 
+// ========================================
+// ADMIN CHECKLIST ENDPOINTS
+// ========================================
+app.get('/api/admin/checklist/:date', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const checklistDate = req.params.date;
+    const userId = req.user.id;
+
+    const [checklists] = await pool.query(
+      'SELECT * FROM admin_checklists WHERE checklist_date = ? AND admin_id = ? ORDER BY created_at DESC LIMIT 1',
+      [checklistDate, userId]
+    );
+
+    if (checklists.length === 0) {
+      // Return null to indicate no checklist exists yet
+      return res.json(null);
+    }
+
+    // Parse checklist_data if it's a string
+    let checklistData = checklists[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+
+    res.json({
+      ...checklists[0],
+      checklist_data: checklistData
+    });
+  } catch (error) {
+    console.error('Get admin checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/admin/checklist/:date', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { checklist_data, notes } = req.body;
+    const checklistDate = req.params.date;
+    const userId = req.user.id;
+
+    // Insert or update checklist
+    const [result] = await pool.query(
+      'INSERT INTO admin_checklists (checklist_date, admin_id, checklist_data, notes) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, notes = ?, updated_at = NOW()',
+      [checklistDate, userId, JSON.stringify(checklist_data), notes || null, JSON.stringify(checklist_data), notes || null]
+    );
+
+    res.status(201).json({
+      message: 'Checklist berhasil disimpan',
+      checklist_id: result.insertId || result.affectedRows
+    });
+  } catch (error) {
+    console.error('Save admin checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({ message: 'API Al Hakim Catering berjalan dengan baik!' });
+});
+
+// ========================================
+// CASH FLOW ENDPOINTS
+// ========================================
+
+// Get cash flow summary (balance, income, expenses)
+app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    
+    let dateFilter = '';
+    const params = [];
+    
+    if (start_date && end_date) {
+      dateFilter = 'WHERE DATE(created_at) BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+    }
+
+    // Get total income
+    const incomeQuery = dateFilter
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'income' AND DATE(created_at) BETWEEN ? AND ?`
+      : `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'income'`;
+    const [incomeResult] = await pool.query(incomeQuery, params);
+    const totalIncome = parseFloat(incomeResult[0].total);
+
+    // Get total expenses
+    const expenseQuery = dateFilter
+      ? `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'expense' AND DATE(created_at) BETWEEN ? AND ?`
+      : `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'expense'`;
+    const [expenseResult] = await pool.query(expenseQuery, params);
+    const totalExpenses = parseFloat(expenseResult[0].total);
+
+    // Calculate balance
+    const balance = totalIncome - totalExpenses;
+
+    res.json({
+      balance,
+      totalIncome,
+      totalExpenses
+    });
+  } catch (error) {
+    console.error('Get cash flow summary error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Get all cash flow transactions
+app.get('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { type, start_date, end_date, limit = 100, offset = 0 } = req.query;
+    
+    let query = `
+      SELECT cft.*, 
+             u.name as created_by_name,
+             o.id as order_id_ref
+      FROM cash_flow_transactions cft
+      LEFT JOIN users u ON cft.created_by = u.id
+      LEFT JOIN orders o ON cft.order_id = o.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (type) {
+      query += ' AND cft.type = ?';
+      params.push(type);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND DATE(cft.created_at) BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+    }
+
+    query += ' ORDER BY cft.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [transactions] = await pool.query(query, params);
+
+    res.json(transactions);
+  } catch (error) {
+    console.error('Get cash flow transactions error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Create cash flow transaction (income or expense)
+app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
+  try {
+    const { type, amount, description } = req.body;
+
+    if (!type || !amount) {
+      return res.status(400).json({ message: 'Type dan amount harus diisi' });
+    }
+
+    if (type !== 'income' && type !== 'expense') {
+      return res.status(400).json({ message: 'Type harus income atau expense' });
+    }
+
+    let proof_image_url = null;
+    if (req.file) {
+      proof_image_url = `/uploads/${req.file.filename}`;
+    }
+
+    const [result] = await pool.query(
+      'INSERT INTO cash_flow_transactions (type, amount, description, proof_image_url, created_by) VALUES (?, ?, ?, ?, ?)',
+      [type, parseFloat(amount), description || null, proof_image_url, req.user.id]
+    );
+
+    res.status(201).json({
+      message: 'Transaksi berhasil ditambahkan',
+      id: result.insertId
+    });
+  } catch (error) {
+    console.error('Create cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Update cash flow transaction
+app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
+  try {
+    const { type, amount, description } = req.body;
+    const transactionId = req.params.id;
+
+    // Check if transaction exists
+    const [transactions] = await pool.query('SELECT id FROM cash_flow_transactions WHERE id = ?', [transactionId]);
+    if (transactions.length === 0) {
+      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
+    }
+
+    let proof_image_url = null;
+    if (req.file) {
+      proof_image_url = `/uploads/${req.file.filename}`;
+    }
+
+    const updateFields = [];
+    const updateParams = [];
+
+    if (type) {
+      updateFields.push('type = ?');
+      updateParams.push(type);
+    }
+    if (amount) {
+      updateFields.push('amount = ?');
+      updateParams.push(parseFloat(amount));
+    }
+    if (description !== undefined) {
+      updateFields.push('description = ?');
+      updateParams.push(description);
+    }
+    if (proof_image_url) {
+      updateFields.push('proof_image_url = ?');
+      updateParams.push(proof_image_url);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
+    }
+
+    updateParams.push(transactionId);
+    await pool.query(
+      `UPDATE cash_flow_transactions SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateParams
+    );
+
+    res.json({ message: 'Transaksi berhasil diupdate' });
+  } catch (error) {
+    console.error('Update cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Delete cash flow transaction
+app.delete('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const transactionId = req.params.id;
+
+    // Check if transaction exists
+    const [transactions] = await pool.query('SELECT id, proof_image_url FROM cash_flow_transactions WHERE id = ?', [transactionId]);
+    if (transactions.length === 0) {
+      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
+    }
+
+    // Delete proof image if exists
+    if (transactions[0].proof_image_url) {
+      const filePath = path.join(__dirname, transactions[0].proof_image_url.replace(/^\//, ''));
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    await pool.query('DELETE FROM cash_flow_transactions WHERE id = ?', [transactionId]);
+
+    res.json({ message: 'Transaksi berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// ========================================
+// COMPANY SETTINGS ENDPOINTS
+// ========================================
+
+// Get company settings
+app.get('/api/company-settings', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const [settings] = await pool.query('SELECT * FROM company_settings WHERE id = 1');
+    
+    if (settings.length === 0) {
+      // Return default settings
+      res.json({
+        id: 1,
+        company_name: 'Al Hakim Catering',
+        company_address: null,
+        company_phone: null,
+        company_email: null,
+        company_logo_url: null,
+        tax_id: null,
+        bank_name: null,
+        bank_account_number: null,
+        bank_account_name: null
+      });
+    } else {
+      res.json(settings[0]);
+    }
+  } catch (error) {
+    console.error('Get company settings error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Update company settings
+app.put('/api/company-settings', authenticateToken, authorizeRole('admin'), upload.single('logo'), async (req, res) => {
+  try {
+    const {
+      company_name,
+      company_address,
+      company_phone,
+      company_email,
+      tax_id,
+      bank_name,
+      bank_account_number,
+      bank_account_name
+    } = req.body;
+
+    let logo_url = null;
+    if (req.file) {
+      logo_url = `/uploads/${req.file.filename}`;
+    }
+
+    // Check if settings exist
+    const [existing] = await pool.query('SELECT id FROM company_settings WHERE id = 1');
+    
+    if (existing.length === 0) {
+      // Insert new settings
+      await pool.query(
+        `INSERT INTO company_settings (
+          id, company_name, company_address, company_phone, company_email,
+          company_logo_url, tax_id, bank_name, bank_account_number, bank_account_name, updated_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          1, company_name, company_address, company_phone, company_email,
+          logo_url, tax_id, bank_name, bank_account_number, bank_account_name, req.user.id
+        ]
+      );
+    } else {
+      // Update existing settings
+      const updateFields = [];
+      const updateParams = [];
+
+      if (company_name !== undefined) {
+        updateFields.push('company_name = ?');
+        updateParams.push(company_name);
+      }
+      if (company_address !== undefined) {
+        updateFields.push('company_address = ?');
+        updateParams.push(company_address);
+      }
+      if (company_phone !== undefined) {
+        updateFields.push('company_phone = ?');
+        updateParams.push(company_phone);
+      }
+      if (company_email !== undefined) {
+        updateFields.push('company_email = ?');
+        updateParams.push(company_email);
+      }
+      if (logo_url) {
+        updateFields.push('company_logo_url = ?');
+        updateParams.push(logo_url);
+      }
+      if (tax_id !== undefined) {
+        updateFields.push('tax_id = ?');
+        updateParams.push(tax_id);
+      }
+      if (bank_name !== undefined) {
+        updateFields.push('bank_name = ?');
+        updateParams.push(bank_name);
+      }
+      if (bank_account_number !== undefined) {
+        updateFields.push('bank_account_number = ?');
+        updateParams.push(bank_account_number);
+      }
+      if (bank_account_name !== undefined) {
+        updateFields.push('bank_account_name = ?');
+        updateParams.push(bank_account_name);
+      }
+
+      updateFields.push('updated_by = ?');
+      updateParams.push(req.user.id);
+
+      if (updateFields.length > 1) {
+        updateParams.push(1);
+        await pool.query(
+          `UPDATE company_settings SET ${updateFields.join(', ')} WHERE id = ?`,
+          updateParams
+        );
+      }
+    }
+
+    res.json({ message: 'Pengaturan perusahaan berhasil diupdate' });
+  } catch (error) {
+    console.error('Update company settings error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// ========================================
+// INVOICE ENDPOINTS
+// ========================================
+
+// Get invoice data for an order
+app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    // Get order with customer info
+    const [orders] = await pool.query(
+      `SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone, u.address as customer_address
+       FROM orders o
+       JOIN users u ON o.user_id = u.id
+       WHERE o.id = ?`,
+      [orderId]
+    );
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    const order = orders[0];
+
+    // Get order items
+    const [items] = await pool.query(
+      'SELECT * FROM order_items WHERE order_id = ?',
+      [orderId]
+    );
+
+    // Get company settings
+    const [companySettings] = await pool.query('SELECT * FROM company_settings WHERE id = 1');
+    const company = companySettings.length > 0 ? companySettings[0] : {
+      company_name: 'Al Hakim Catering',
+      company_address: null,
+      company_phone: null,
+      company_email: null,
+      company_logo_url: null,
+      tax_id: null,
+      bank_name: null,
+      bank_account_number: null,
+      bank_account_name: null
+    };
+
+    // Use guest customer info if available
+    const customerName = order.guest_customer_name || order.customer_name;
+    const customerPhone = order.guest_wa_number_1 || order.customer_phone;
+    const customerEmail = order.customer_email;
+    const customerAddress = order.delivery_address;
+
+    res.json({
+      order: {
+        ...order,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        customer_email: customerEmail,
+        customer_address: customerAddress
+      },
+      items,
+      company
+    });
+  } catch (error) {
+    console.error('Get invoice error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
 });
 
 app.listen(PORT, () => {

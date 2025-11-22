@@ -70,6 +70,9 @@ export const orderAPI = {
   updateStatus: (id, data) => api.put(`/orders/${id}/status`, data, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  getInvoice: (id) => api.get(`/orders/${id}/invoice`),
+  pinOrder: (id, is_pinned) => api.put(`/orders/${id}/pin`, { is_pinned }),
+  getReview: (id) => api.get(`/orders/${id}/review`),
   addReview: (id, data) => api.post(`/orders/${id}/review`, data, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
@@ -94,6 +97,9 @@ export const orderAPI = {
   // Operasional Checklist
   getOperasionalChecklist: (date) => api.get(`/operasional/checklist/${date}`),
   saveOperasionalChecklist: (date, data) => api.post(`/operasional/checklist/${date}`, data),
+  // Reviews
+  getReviews: (params) => api.get('/reviews', { params }),
+  resolveReview: (id, type) => api.put(`/reviews/${id}/resolve`, { type }),
 };
 
 export const voucherAPI = {
@@ -126,6 +132,12 @@ export const commissionAPI = {
   getBalance: () => api.get('/commission/balance'),
   getHistory: () => api.get('/commission/history'),
   getOrders: () => api.get('/commission/orders'),
+  withdraw: (data) => api.post('/commission/withdraw', data),
+};
+
+export const adminCommissionAPI = {
+  getWithdrawals: (params) => api.get('/admin/commission-withdrawals', { params }),
+  updateWithdrawalStatus: (id, data) => api.put(`/admin/commission-withdrawals/${id}`, data),
 };
 
 export const statsAPI = {
@@ -153,6 +165,34 @@ export const cartAPI = {
   update: (id, data) => api.put(`/cart/${id}`, data),
   remove: (id) => api.delete(`/cart/${id}`),
   clear: () => api.delete('/cart/clear'),
+};
+
+export const cashFlowAPI = {
+  getSummary: (params) => api.get('/cash-flow/summary', { params }),
+  getTransactions: (params) => api.get('/cash-flow/transactions', { params }),
+  createTransaction: (formData) => api.post('/cash-flow/transactions', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  updateTransaction: (id, formData) => api.put(`/cash-flow/transactions/${id}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  deleteTransaction: (id) => api.delete(`/cash-flow/transactions/${id}`),
+};
+
+export const companySettingsAPI = {
+  get: () => api.get('/company-settings'),
+  update: (formData) => api.put('/company-settings', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+};
+
+export const invoiceAPI = {
+  getInvoiceData: (id) => api.get(`/orders/${id}/invoice`),
+};
+
+export const adminChecklistAPI = {
+  getByDate: (date) => api.get(`/admin/checklist/${date}`),
+  save: (date, data) => api.post(`/admin/checklist/${date}`, data),
 };
 
 export default api;

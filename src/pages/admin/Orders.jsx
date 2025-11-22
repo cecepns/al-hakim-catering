@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import InvoiceModal from '../../components/InvoiceModal';
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
 
   useEffect(() => {
     fetchOrders();
@@ -172,12 +175,26 @@ const AdminOrders = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <Link
-                          to={`/admin/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-900"
-                        >
-                          Detail
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            to={`/admin/orders/${order.id}`}
+                            className="text-primary-600 hover:text-primary-900"
+                          >
+                            Detail
+                          </Link>
+                          {order.status !== 'dibatalkan' && (
+                            <button
+                              onClick={() => {
+                                setSelectedOrderId(order.id);
+                                setInvoiceModalOpen(true);
+                              }}
+                              className="text-green-600 hover:text-green-900"
+                              title="Lihat Faktur/Nota"
+                            >
+                              Faktur
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -186,6 +203,15 @@ const AdminOrders = () => {
             </div>
           )}
         </div>
+
+        <InvoiceModal
+          isOpen={invoiceModalOpen}
+          onClose={() => {
+            setInvoiceModalOpen(false);
+            setSelectedOrderId(null);
+          }}
+          orderId={selectedOrderId}
+        />
       </div>
     </DashboardLayout>
   );

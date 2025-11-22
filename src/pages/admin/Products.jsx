@@ -12,6 +12,7 @@ const AdminProducts = () => {
 
   useEffect(() => {
     fetchProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const fetchProducts = async () => {
@@ -19,7 +20,24 @@ const AdminProducts = () => {
       setLoading(true);
       const params = filter !== 'all' ? { category: filter } : {};
       const response = await productAPI.getAll(params);
-      setProducts(response.data);
+      
+      // Fetch images for each product and use first image if available
+      const productsWithImages = await Promise.all(
+        response.data.map(async (product) => {
+          try {
+            const imagesRes = await productAPI.getImages(product.id);
+            const images = imagesRes.data || [];
+            // Use first image if available, otherwise use product.image_url
+            const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
+            return { ...product, image_url: displayImage };
+          } catch {
+            // If images fetch fails, keep the original image_url
+            return product;
+          }
+        })
+      );
+      
+      setProducts(productsWithImages);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {

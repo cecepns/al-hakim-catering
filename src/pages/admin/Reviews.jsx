@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { orderAPI } from '../../utils/api';
+import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const AdminReviews = () => {
@@ -26,11 +27,11 @@ const AdminReviews = () => {
     }
   };
 
-  const handleResolve = async (id) => {
+  const handleResolve = async (review) => {
     if (!window.confirm('Tandai sebagai telah ditangani?')) return;
 
     try {
-      await orderAPI.resolveReview(id);
+      await orderAPI.resolveReview(review.id, review.type);
       alert('Review berhasil ditandai sebagai selesai');
       fetchReviews();
     } catch (error) {
@@ -180,9 +181,10 @@ const AdminReviews = () => {
                   {review.image_url && (
                     <div className="mb-4">
                       <img
-                        src={review.image_url}
+                        src={getImageUrl(review.image_url)}
                         alt="Review"
-                        className="w-48 h-48 object-cover rounded-lg"
+                        className="w-48 h-48 object-cover rounded-lg cursor-pointer"
+                        onClick={() => window.open(getImageUrl(review.image_url), '_blank')}
                       />
                     </div>
                   )}
@@ -190,7 +192,7 @@ const AdminReviews = () => {
                   {!review.resolved && (
                     <div className="flex justify-end">
                       <button
-                        onClick={() => handleResolve(review.id)}
+                        onClick={() => handleResolve(review)}
                         className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
                       >
                         Tandai Selesai

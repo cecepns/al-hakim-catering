@@ -24,6 +24,9 @@ import AdminVouchers from './pages/admin/Vouchers';
 import AdminBanners from './pages/admin/Banners';
 import AdminUsers from './pages/admin/Users';
 import AdminReviews from './pages/admin/Reviews';
+import AdminChecklist from './pages/admin/Checklist';
+import AdminCommissionWithdrawals from './pages/admin/CommissionWithdrawals';
+import CashFlow from './pages/admin/CashFlow';
 
 // Pembeli Pages
 import PembeliDashboard from './pages/pembeli/Dashboard';
@@ -179,6 +182,30 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['admin']}>
             <AdminReviews />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/checklist"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminChecklist />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/commission-withdrawals"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminCommissionWithdrawals />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/cash-flow"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <CashFlow />
           </ProtectedRoute>
         }
       />

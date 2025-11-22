@@ -4,6 +4,7 @@ import { orderAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
+import InvoiceModal from '../../components/InvoiceModal';
 
 const AdminOrderDetail = () => {
   const { id } = useParams();
@@ -14,8 +15,11 @@ const AdminOrderDetail = () => {
   const [statusModal, setStatusModal] = useState(false);
   const [newStatus, setNewStatus] = useState('');
   const [notes, setNotes] = useState('');
+  const [proofFile, setProofFile] = useState(null);
+  const [proofPreview, setProofPreview] = useState(null);
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -39,15 +43,38 @@ const AdminOrderDetail = () => {
 
     try {
       setUpdating(true);
-      await orderAPI.updateStatus(id, { status: newStatus, notes });
+      const formData = new FormData();
+      formData.append('status', newStatus);
+      formData.append('notes', notes);
+      if (proofFile) {
+        formData.append('proof', proofFile);
+      }
+      
+      await orderAPI.updateStatus(id, formData);
       alert('Status pesanan berhasil diupdate');
       setStatusModal(false);
+      setNewStatus('');
+      setNotes('');
+      setProofFile(null);
+      setProofPreview(null);
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
       alert('Gagal mengupdate status');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleProofChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setProofFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProofPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -270,12 +297,22 @@ const AdminOrderDetail = () => {
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Aksi</h2>
-              <button
-                onClick={() => setStatusModal(true)}
-                className="w-full bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition"
-              >
-                Update Status
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={() => setStatusModal(true)}
+                  className="w-full bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition"
+                >
+                  Update Status
+                </button>
+                {order.status !== 'dibatalkan' && (
+                  <button
+                    onClick={() => setInvoiceModalOpen(true)}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
+                  >
+                    Lihat Faktur/Nota
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -315,9 +352,45 @@ const AdminOrderDetail = () => {
                     placeholder="Tambahkan catatan..."
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bukti Foto (Opsional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProofChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                  {proofPreview && (
+                    <div className="mt-2">
+                      <img
+                        src={proofPreview}
+                        alt="Preview"
+                        className="w-32 h-32 object-cover rounded-lg border border-gray-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProofFile(null);
+                          setProofPreview(null);
+                        }}
+                        className="mt-2 text-sm text-red-600 hover:text-red-800"
+                      >
+                        Hapus Preview
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="flex space-x-3">
                   <button
-                    onClick={() => setStatusModal(false)}
+                    onClick={() => {
+                      setStatusModal(false);
+                      setNewStatus('');
+                      setNotes('');
+                      setProofFile(null);
+                      setProofPreview(null);
+                    }}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >
                     Batal
@@ -344,6 +417,13 @@ const AdminOrderDetail = () => {
             setViewingImage(null);
           }}
           title="Bukti Foto"
+        />
+
+        {/* Invoice Modal */}
+        <InvoiceModal
+          isOpen={invoiceModalOpen}
+          onClose={() => setInvoiceModalOpen(false)}
+          orderId={id}
         />
       </div>
     </DashboardLayout>

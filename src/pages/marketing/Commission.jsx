@@ -11,6 +11,13 @@ const MarketingCommission = () => {
     history: [],
   });
   const [loading, setLoading] = useState(true);
+  const [withdrawForm, setWithdrawForm] = useState({
+    amount: '',
+    bank_name: '',
+    account_number: '',
+    account_name: '',
+  });
+  const [withdrawModal, setWithdrawModal] = useState(false);
 
   useEffect(() => {
     fetchCommission();
@@ -34,13 +41,36 @@ const MarketingCommission = () => {
       return;
     }
 
-    if (!window.confirm(`Tarik komisi sebesar Rp ${formatRupiah(commission.balance)}?`)) {
+    setWithdrawForm({
+      amount: commission.balance.toString(),
+      bank_name: '',
+      account_number: '',
+      account_name: '',
+    });
+    setWithdrawModal(true);
+  };
+
+  const handleWithdrawSubmit = async () => {
+    if (!withdrawForm.bank_name || !withdrawForm.account_number || !withdrawForm.account_name) {
+      alert('Semua field bank harus diisi');
+      return;
+    }
+
+    if (parseFloat(withdrawForm.amount) < 50000) {
+      alert('Minimal penarikan adalah Rp 50.000');
       return;
     }
 
     try {
-      await commissionAPI.withdraw();
+      await commissionAPI.withdraw(withdrawForm);
       alert('Permintaan penarikan berhasil diajukan');
+      setWithdrawModal(false);
+      setWithdrawForm({
+        amount: '',
+        bank_name: '',
+        account_number: '',
+        account_name: '',
+      });
       fetchCommission();
     } catch (error) {
       console.error('Error withdrawing:', error);
@@ -191,6 +221,88 @@ const MarketingCommission = () => {
             </div>
           )}
         </div>
+
+        {/* Withdraw Modal */}
+        {withdrawModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Tarik Komisi</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Jumlah (Rp)
+                  </label>
+                  <input
+                    type="number"
+                    value={withdrawForm.amount}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    placeholder="50000"
+                    min="50000"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nama Bank
+                  </label>
+                  <input
+                    type="text"
+                    value={withdrawForm.bank_name}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, bank_name: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    placeholder="Contoh: BCA, Mandiri, BRI"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nomor Rekening
+                  </label>
+                  <input
+                    type="text"
+                    value={withdrawForm.account_number}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, account_number: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    placeholder="1234567890"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nama Pemilik Rekening
+                  </label>
+                  <input
+                    type="text"
+                    value={withdrawForm.account_name}
+                    onChange={(e) => setWithdrawForm({ ...withdrawForm, account_name: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    placeholder="Nama sesuai rekening"
+                  />
+                </div>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => {
+                      setWithdrawModal(false);
+                      setWithdrawForm({
+                        amount: '',
+                        bank_name: '',
+                        account_number: '',
+                        account_name: '',
+                      });
+                    }}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handleWithdrawSubmit}
+                    className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                  >
+                    Ajukan Penarikan
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

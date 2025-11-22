@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Pin, PinOff } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -9,6 +9,7 @@ const DapurOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [pinningOrderId, setPinningOrderId] = useState(null);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -64,6 +65,21 @@ const DapurOrders = () => {
       day: 'numeric',
     });
     return time ? `${dateStr} ${time}` : dateStr;
+  };
+
+  const handlePinOrder = async (orderId, currentPinnedStatus) => {
+    try {
+      setPinningOrderId(orderId);
+      // Toggle: if currently pinned, unpin it; if not pinned, pin it
+      await orderAPI.pinOrder(orderId, !currentPinnedStatus);
+      // Refresh orders
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error pinning/unpinning order:', error);
+      alert(error.response?.data?.message || 'Gagal mengubah status sematkan');
+    } finally {
+      setPinningOrderId(null);
+    }
   };
 
   const statuses = [
@@ -142,13 +158,28 @@ const DapurOrders = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Aksi
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Sematkan
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
+                    <tr 
+                      key={order.id} 
+                      className={`hover:bg-gray-50 transition-colors ${
+                        order.is_pinned 
+                          ? 'bg-yellow-50 border-l-4 border-yellow-400' 
+                          : ''
+                      }`}
+                    >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{order.id}
+                        <div className="flex items-center gap-2">
+                          {order.is_pinned && (
+                            <Pin size={16} className="text-yellow-600" fill="currentColor" />
+                          )}
+                          <span>#{order.id}</span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {order.customer_name}
@@ -181,6 +212,32 @@ const DapurOrders = () => {
                         >
                           {order.status === 'dibuat' ? 'Proses' : 'Lihat'}
                         </Link>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <button
+                          onClick={() => handlePinOrder(order.id, order.is_pinned)}
+                          disabled={pinningOrderId === order.id}
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            order.is_pinned
+                              ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          title={order.is_pinned ? 'Batalkan Sematkan' : 'Sematkan Pesanan'}
+                        >
+                          {pinningOrderId === order.id ? (
+                            <span className="animate-spin">⏳</span>
+                          ) : order.is_pinned ? (
+                            <>
+                              <PinOff size={14} />
+                              Batal Sematkan
+                            </>
+                          ) : (
+                            <>
+                              <Pin size={14} />
+                              Sematkan
+                            </>
+                          )}
+                        </button>
                       </td>
                     </tr>
                   ))}

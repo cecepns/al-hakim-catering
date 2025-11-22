@@ -4,13 +4,16 @@ import { toast } from 'react-toastify';
 import { productAPI } from '../utils/api';
 import { getImageUrl } from '../utils/imageHelper';
 import { formatRupiah } from '../utils/formatHelper';
+import { useAuth } from '../context/AuthContext';
 
 const Products = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState(searchParams.get('category') || 'all');
+  const [commissionPercentage, setCommissionPercentage] = useState(0);
 
   const fetchProducts = async () => {
     try {
@@ -27,7 +30,7 @@ const Products = () => {
             // Use first image if available, otherwise use product.image_url
             const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
             return { ...product, image_url: displayImage };
-          } catch (error) {
+          } catch {
             // If images fetch fails, keep the original image_url
             return product;
           }
@@ -44,8 +47,11 @@ const Products = () => {
 
   useEffect(() => {
     fetchProducts();
+    if (user?.role === 'marketing' && user?.commission_percentage) {
+      setCommissionPercentage(parseFloat(user.commission_percentage) || 0);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [filter, user]);
 
   const handleBuyNow = (product) => {
     // Navigate directly to checkout with product data - no login required
@@ -144,6 +150,17 @@ const Products = () => {
                         <span className="text-primary-600 font-bold text-xl">
                           Rp {formatRupiah(product.price)}
                         </span>
+                      )}
+                      {user?.role === 'marketing' && commissionPercentage > 0 && (
+                        <div className="mt-1">
+                          <p className="text-xs text-gray-500">Komisi Anda</p>
+                          <span className="text-green-600 font-semibold text-sm">
+                            Rp {formatRupiah(((product.discounted_price || product.price) * commissionPercentage) / 100)}
+                          </span>
+                          <span className="text-xs text-gray-500 ml-1">
+                            ({commissionPercentage}%)
+                          </span>
+                        </div>
                       )}
                     </div>
                   </div>

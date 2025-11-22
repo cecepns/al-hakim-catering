@@ -22,6 +22,7 @@ const ProductForm = () => {
     discount_percentage: '0',
     is_promo: false,
     stock: '',
+    commission_percentage: '0',
   });
 
   const [images, setImages] = useState([]);
@@ -57,6 +58,7 @@ const ProductForm = () => {
         discount_percentage: product.discount_percentage || 0,
         is_promo: product.is_promo,
         stock: product.stock,
+        commission_percentage: product.commission_percentage || 0,
       });
 
       // Fetch images, variations, and addons
@@ -109,6 +111,7 @@ const ProductForm = () => {
       submitData.append('discount_percentage', formData.discount_percentage);
       submitData.append('is_promo', formData.is_promo);
       submitData.append('stock', formData.stock);
+      submitData.append('commission_percentage', formData.commission_percentage);
 
       if (isEdit) {
         await productAPI.update(id, submitData);
@@ -405,6 +408,27 @@ const ProductForm = () => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 placeholder="100"
               />
+            </div>
+
+            {/* Commission Percentage */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Komisi Marketing (%)
+              </label>
+              <input
+                type="number"
+                name="commission_percentage"
+                value={formData.commission_percentage}
+                onChange={handleChange}
+                min="0"
+                max="100"
+                step="0.01"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Persentase komisi yang akan diberikan ke marketing dari harga produk
+              </p>
             </div>
 
             {/* Is Promo */}

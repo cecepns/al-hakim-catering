@@ -9,22 +9,47 @@ const PembeliOrders = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    fetchOrders();
-  }, [filter]);
-
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const params = filter !== 'all' ? { status: filter } : {};
-      const response = await orderAPI.getAll(params);
-      setOrders(response.data);
+      
+      if (filter === 'review') {
+        // Fetch all completed orders
+        const response = await orderAPI.getAll({ status: 'selesai' });
+        const completedOrders = response.data || [];
+        
+        // Check which orders have reviews
+        const reviewedOrderIds = new Set();
+        await Promise.all(
+          completedOrders.map(async (order) => {
+            try {
+              await orderAPI.getReview(order.id);
+              reviewedOrderIds.add(order.id);
+            } catch {
+              // Order doesn't have review yet
+            }
+          })
+        );
+        
+        // Show only orders that can be reviewed (selesai and no review)
+        const ordersData = completedOrders.filter(order => !reviewedOrderIds.has(order.id));
+        setOrders(ordersData);
+      } else {
+        const params = filter !== 'all' ? { status: filter } : {};
+        const response = await orderAPI.getAll(params);
+        setOrders(response.data);
+      }
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -43,6 +68,7 @@ const PembeliOrders = () => {
     { value: 'diproses', label: 'Diproses' },
     { value: 'dikirim', label: 'Dikirim' },
     { value: 'selesai', label: 'Selesai' },
+    { value: 'review', label: 'Review' },
   ];
 
   return (
