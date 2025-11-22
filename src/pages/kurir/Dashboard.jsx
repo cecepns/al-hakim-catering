@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { useAuth } from '../../context/AuthContext';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const KurirDashboard = () => {
-  const { user } = useAuth();
   const [orders, setOrders] = useState([]);
   const [stats, setStats] = useState({
     readyToShip: 0,
@@ -14,6 +12,40 @@ const KurirDashboard = () => {
     delivered: 0,
   });
   const [loading, setLoading] = useState(true);
+
+  const checkEventWarning = (order) => {
+    if (!order.guest_event_date || !order.guest_event_time) return null;
+    
+    const eventDate = new Date(`${order.guest_event_date}T${order.guest_event_time}`);
+    const now = new Date();
+    const diffMs = eventDate - now;
+    const diffMinutes = diffMs / (1000 * 60);
+    
+    // Warning 30 minutes before event
+    if (diffMinutes > 0 && diffMinutes <= 30) {
+      return true;
+    }
+    return false;
+  };
+
+  const formatEventDateTime = (order) => {
+    if (!order.guest_event_date || !order.guest_event_time) return null;
+    
+    const eventDate = new Date(`${order.guest_event_date}T${order.guest_event_time}`);
+    return {
+      date: eventDate.toLocaleDateString('id-ID', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      }),
+      time: eventDate.toLocaleTimeString('id-ID', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      }),
+      fullDateTime: eventDate.toLocaleString('id-ID')
+    };
+  };
 
   useEffect(() => {
     fetchOrders();
@@ -184,36 +216,56 @@ const KurirDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
-                        #{order.id}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
-                        <div className="font-medium text-gray-900">{order.customer_name}</div>
-                        <div className="text-xs text-gray-600">{order.customer_phone}</div>
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 hidden md:table-cell max-w-xs truncate">
-                        {order.delivery_address}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                        Rp {formatRupiah(order.total_amount)}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
-                        <Link
-                          to={`/kurir/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-700 font-semibold"
-                        >
-                          {order.status === 'diproses' ? 'Kirim' : 'Lihat'}
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {orders.map((order) => {
+                    const eventInfo = formatEventDateTime(order);
+                    const hasWarning = checkEventWarning(order);
+                    
+                    return (
+                      <tr key={order.id} className={`hover:bg-gray-50 ${hasWarning ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
+                          <div>#{order.id}</div>
+                          {eventInfo && (
+                            <div className="text-xs text-gray-600 mt-1">
+                              <div className="font-medium">Acara:</div>
+                              <div>{eventInfo.date}</div>
+                              <div>{eventInfo.time}</div>
+                              {hasWarning && (
+                                <div className="mt-1 text-yellow-700 font-semibold flex items-center gap-1">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  Pesanan harus segera tiba
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
+                          <div className="font-medium text-gray-900">{order.customer_name}</div>
+                          <div className="text-xs text-gray-600">{order.customer_phone}</div>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm text-gray-600 hidden md:table-cell max-w-xs truncate">
+                          {order.delivery_address}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
+                          Rp {formatRupiah(order.total_amount)}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
+                          <Link
+                            to={`/kurir/orders/${order.id}`}
+                            className="text-primary-600 hover:text-primary-700 font-semibold"
+                          >
+                            {order.status === 'diproses' ? 'Kirim' : 'Lihat'}
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

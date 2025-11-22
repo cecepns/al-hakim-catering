@@ -8,11 +8,9 @@ const MarketingPricing = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [margins, setMargins] = useState({});
 
   useEffect(() => {
     fetchProducts();
-    loadMargins();
   }, [filter]);
 
   const fetchProducts = async () => {
@@ -20,7 +18,24 @@ const MarketingPricing = () => {
       setLoading(true);
       const params = filter !== 'all' ? { category: filter } : {};
       const response = await productAPI.getAll(params);
-      setProducts(response.data);
+      
+      // Fetch images for each product and use first image if available
+      const productsWithImages = await Promise.all(
+        response.data.map(async (product) => {
+          try {
+            const imagesRes = await productAPI.getImages(product.id);
+            const images = imagesRes.data || [];
+            // Use first image if available, otherwise use product.image_url
+            const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
+            return { ...product, image_url: displayImage };
+          } catch (error) {
+            // If images fetch fails, keep the original image_url
+            return product;
+          }
+        })
+      );
+      
+      setProducts(productsWithImages);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {
@@ -28,28 +43,6 @@ const MarketingPricing = () => {
     }
   };
 
-  const loadMargins = () => {
-    const saved = localStorage.getItem('marketing_margins');
-    if (saved) {
-      setMargins(JSON.parse(saved));
-    }
-  };
-
-  const handleMarginChange = (productId, value) => {
-    const newMargins = { ...margins, [productId]: value };
-    setMargins(newMargins);
-    localStorage.setItem('marketing_margins', JSON.stringify(newMargins));
-  };
-
-  const calculateSellingPrice = (product) => {
-    const basePrice = product.discounted_price || product.price;
-    const margin = parseInt(margins[product.id] || 0);
-    return basePrice + margin;
-  };
-
-  const calculateCommission = (product) => {
-    return parseInt(margins[product.id] || 0);
-  };
 
   const categories = [
     { value: 'all', label: 'Semua' },
@@ -63,9 +56,9 @@ const MarketingPricing = () => {
     <DashboardLayout role="marketing">
       <div>
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Atur Harga Jual</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Katalog Produk</h1>
           <p className="text-gray-600 mt-1">
-            Tentukan margin keuntungan Anda untuk setiap produk
+            Lihat harga dasar produk dan atur margin pada total pesanan saat checkout
           </p>
         </div>
 
@@ -77,9 +70,16 @@ const MarketingPricing = () => {
               </svg>
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-primary-800">Cara Kerja:</h3>
+              <h3 className="text-sm font-medium text-primary-800">Cara Kerja Komisi Baru:</h3>
               <p className="mt-1 text-sm text-primary-700">
-                Tambahkan margin keuntungan di atas harga dasar produk. Margin yang Anda tambahkan akan menjadi komisi Anda saat produk terjual.
+                <strong>Komisi Anda terdiri dari 2 bagian:</strong>
+              </p>
+              <ul className="mt-2 text-sm text-primary-700 list-disc list-inside space-y-1">
+                <li><strong>Komisi dari Admin:</strong> Otomatis dihitung berdasarkan persentase yang ditetapkan admin dari harga dasar pesanan</li>
+                <li><strong>Margin Tambahan:</strong> Anda dapat menambahkan margin pada total pesanan saat checkout (misalnya: total 100.000 ditagih 125.000, margin = 25.000)</li>
+              </ul>
+              <p className="mt-2 text-sm text-primary-700">
+                <strong>Total Komisi = Komisi Admin + Margin Tambahan</strong>
               </p>
             </div>
           </div>
@@ -124,13 +124,10 @@ const MarketingPricing = () => {
                       Harga Dasar
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Margin Anda
+                      Stok
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Harga Jual
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Komisi Anda
+                      Kategori
                     </th>
                   </tr>
                 </thead>
@@ -148,7 +145,6 @@ const MarketingPricing = () => {
                             <div className="text-sm font-medium text-gray-900">
                               {product.name}
                             </div>
-                            <div className="text-sm text-gray-500">{product.category}</div>
                           </div>
                         </div>
                       </td>
@@ -163,24 +159,12 @@ const MarketingPricing = () => {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <input
-                          type="number"
-                          value={margins[product.id] || ''}
-                          onChange={(e) => handleMarginChange(product.id, e.target.value)}
-                          placeholder="0"
-                          min="0"
-                          className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-sm"
-                        />
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-bold text-primary-600">
-                          Rp {formatRupiah(calculateSellingPrice(product))}
+                        <div className="text-sm text-gray-900">
+                          {product.stock}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-bold text-green-600">
-                          Rp {formatRupiah(calculateCommission(product))}
-                        </div>
+                        <div className="text-sm text-gray-500">{product.category}</div>
                       </td>
                     </tr>
                   ))}
@@ -198,12 +182,12 @@ const MarketingPricing = () => {
               </svg>
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-green-800">Tips Sukses:</h3>
+              <h3 className="text-sm font-medium text-green-800">Cara Mengatur Margin:</h3>
               <ul className="mt-1 text-sm text-green-700 list-disc list-inside space-y-1">
-                <li>Sesuaikan margin dengan kondisi pasar lokal Anda</li>
-                <li>Margin terlalu tinggi bisa mengurangi daya saing</li>
-                <li>Cek harga kompetitor sebelum menentukan margin</li>
-                <li>Margin ini akan otomatis menjadi komisi Anda saat produk terjual</li>
+                <li>Pilih produk yang ingin dijual dan tambahkan ke keranjang</li>
+                <li>Saat checkout, Anda dapat menambahkan margin pada total pesanan</li>
+                <li>Margin akan ditambahkan ke harga total yang ditagih ke customer</li>
+                <li>Komisi Anda = Komisi dari Admin (otomatis) + Margin yang Anda tambahkan</li>
               </ul>
             </div>
           </div>

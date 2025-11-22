@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
+import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import ImageViewer from '../../components/ImageViewer';
 
 const KurirOrderDetail = () => {
   const { id } = useParams();
@@ -11,40 +13,232 @@ const KurirOrderDetail = () => {
   const [loading, setLoading] = useState(true);
   const [shipping, setShipping] = useState(false);
   const [notes, setNotes] = useState('');
-  const [proofFile, setProofFile] = useState(null);
-  const [proofPreview, setProofPreview] = useState('');
+  const [proofShippingFile, setProofShippingFile] = useState(null);
+  const [proofShippingPreview, setProofShippingPreview] = useState('');
+  const [proofShippingExisting, setProofShippingExisting] = useState(null);
+  const [proofDeliveryFile, setProofDeliveryFile] = useState(null);
+  const [proofDeliveryPreview, setProofDeliveryPreview] = useState('');
+  const [proofDeliveryExisting, setProofDeliveryExisting] = useState(null);
+  const [viewingImage, setViewingImage] = useState(null);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [checklist, setChecklist] = useState(null);
+  const [savingChecklist, setSavingChecklist] = useState(false);
 
-  useEffect(() => {
-    fetchOrder();
-  }, [id]);
+  const getDefaultChecklistStructure = () => {
+    return {
+      sections: [
+        {
+          id: 'section1',
+          title: 'PERSIAPAN SEBELUM BERANGKAT',
+          items: [
+            { id: 'item_1', text: 'Terima informasi pengiriman dari Tim dapur & admin operasional', checked: false },
+            { id: 'item_2', text: 'Cek alamat tujuan, waktu kirim, dan kontak penerima', checked: false },
+            { id: 'item_3', text: 'Pastikan jenis kendaraan sesuai jumlah & jenis barang', checked: false },
+            { id: 'item_4', text: 'Cek kebersihan kendaraan (bebas debu, bau, dan sisa makanan)', checked: false },
+            { id: 'item_5', text: 'Isi bahan bakar secukupnya untuk seluruh rute', checked: false },
+            { id: 'item_6', text: 'Siapkan alat bantu: keranjang, troli, dus besar, plastik pelindung dll', checked: false },
+            { id: 'item_7', text: 'Pastikan HP aktif, baterai penuh, dan ada paket data', checked: false },
+            { id: 'item_8', text: 'Gunakan seragam, dan perlengkapan kerja lengkap', checked: false }
+          ]
+        },
+        {
+          id: 'section2',
+          title: 'PERLENGKAPAN KEAMANAN & ANTISIPASI CUACA',
+          items: [
+            { id: 'item_1', text: 'Siapkan jas hujan / mantel (khusus pengiriman outdoor/motor)', checked: false },
+            { id: 'item_2', text: 'Siapkan plastik besar / terpal untuk menutup barang dari hujan', checked: false },
+            { id: 'item_3', text: 'Siapkan tali pengikat / pengaman untuk barang besar', checked: false },
+            { id: 'item_4', text: 'Pastikan helm & jaket safety dalam kondisi baik', checked: false },
+            { id: 'item_5', text: 'Cek ban, rem, dan lampu kendaraan sebelum jalan', checked: false }
+          ]
+        },
+        {
+          id: 'section3',
+          title: 'PENGECEKAN BARANG SEBELUM MUAT',
+          items: [
+            { id: 'item_1', text: 'Cocokkan jumlah barang dengan nota dapur / packing list', checked: false },
+            { id: 'item_2', text: 'Pastikan kemasan utuh, tidak bocor, tidak penyok', checked: false },
+            { id: 'item_3', text: 'Pisahkan menu panas, dingin, dan perlengkapan hajatan', checked: false },
+            { id: 'item_4', text: 'Packing/Lindungi makanan atau barang mudah rusak dengan plastik tambahan', checked: false },
+            { id: 'item_5', text: 'Pastikan semua barang sudah difoto sebelum dimuat / upload resi jika dikirim dengan expedisi', checked: false }
+          ]
+        },
+        {
+          id: 'section4',
+          title: 'PROSES PEMUATAN',
+          items: [
+            { id: 'item_1', text: 'Muat barang sesuai urutan pengantaran (rute jauh di belakang, dekat di depan)', checked: false },
+            { id: 'item_2', text: 'Gunakan alas bersih di dalam kendaraan', checked: false },
+            { id: 'item_3', text: 'Pastikan posisi stabil (tidak miring / mudah terguncang)', checked: false },
+            { id: 'item_4', text: 'Gunakan tali pengikat bila perlu', checked: false },
+            { id: 'item_5', text: 'Lindungi kemasan dengan plastik / terpal bila cuaca tidak menentu', checked: false }
+          ]
+        },
+        {
+          id: 'section5',
+          title: 'SELAMA PERJALANAN',
+          items: [
+            { id: 'item_1', text: 'Berkendara hati-hati dan stabil (hindari rem mendadak)', checked: false },
+            { id: 'item_2', text: 'Hindari rute bergelombang bila memungkinkan', checked: false },
+            { id: 'item_3', text: 'Update posisi ke admin bila pengiriman jauh atau terhambat hujan', checked: false },
+            { id: 'item_4', text: 'Pastikan suhu & kondisi barang aman selama perjalanan', checked: false },
+            { id: 'item_5', text: 'Berhenti sejenak bila hujan deras untuk melindungi barang', checked: false }
+          ]
+        },
+        {
+          id: 'section6',
+          title: 'SESAMPAINYA DI LOKASI / PELANGGAN',
+          items: [
+            { id: 'item_1', text: 'Cek kembali nama & alamat penerima', checked: false },
+            { id: 'item_2', text: 'Serahkan barang dengan sopan dan ramah', checked: false },
+            { id: 'item_3', text: 'Pastikan pelanggan menerima pesanan dalam kondisi baik', checked: false },
+            { id: 'item_4', text: 'Tunjukkan nota / bukti pengiriman', checked: false },
+            { id: 'item_5', text: 'Foto bukti serah terima (barang + lokasi/penerima)', checked: false },
+            { id: 'item_6', text: 'Catat jika ada komplain, kekurangan, atau kerusakan', checked: false }
+          ]
+        },
+        {
+          id: 'section7',
+          title: 'SETELAH PENGIRIMAN',
+          items: [
+            { id: 'item_1', text: 'Laporkan jika ada kendala pengiriman di lapangan', checked: false },
+            { id: 'item_2', text: 'Bersihkan kendaraan dari sisa barang atau kotoran', checked: false },
+            { id: 'item_3', text: 'Isi bahan bakar bila perlu untuk kesiapan berikutnya', checked: false },
+            { id: 'item_4', text: 'Cek kondisi perlengkapan (jas hujan, plastik, tali, alat bantu)', checked: false }
+          ]
+        }
+      ]
+    };
+  };
 
-  const fetchOrder = async () => {
+  const fetchOrder = useCallback(async () => {
     try {
       setLoading(true);
       const response = await orderAPI.getById(id);
-      setOrder(response.data);
+      const orderData = response.data;
+      setOrder(orderData);
+      
+      // Extract existing proofs from status logs
+      if (orderData.statusLogs && Array.isArray(orderData.statusLogs)) {
+        // Find proof_shipping (from status 'dikirim')
+        const shippingLog = orderData.statusLogs.find(log => 
+          log.status === 'dikirim' && (log.proof_image_url || log.proof_url)
+        );
+        if (shippingLog) {
+          const proofUrl = shippingLog.proof_image_url || shippingLog.proof_url;
+          setProofShippingExisting(getImageUrl(proofUrl));
+        }
+        
+        // Find proof_delivery (from status 'selesai')
+        const deliveryLog = orderData.statusLogs.find(log => 
+          log.status === 'selesai' && (log.proof_image_url || log.proof_url)
+        );
+        if (deliveryLog) {
+          const proofUrl = deliveryLog.proof_image_url || deliveryLog.proof_url;
+          setProofDeliveryExisting(getImageUrl(proofUrl));
+        }
+      }
     } catch (error) {
       console.error('Error fetching order:', error);
       alert('Gagal memuat detail pesanan');
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  const handleFileChange = (e) => {
+  const fetchChecklist = useCallback(async () => {
+    try {
+      const response = await orderAPI.getKurirChecklist(id);
+      if (response.data.checklist_data) {
+        const checklistData = typeof response.data.checklist_data === 'string' 
+          ? JSON.parse(response.data.checklist_data) 
+          : response.data.checklist_data;
+        setChecklist(checklistData);
+      } else {
+        // Use default structure
+        setChecklist(response.data.checklist_data || getDefaultChecklistStructure());
+      }
+    } catch (error) {
+      console.error('Error fetching checklist:', error);
+      // Use default structure on error
+      setChecklist(getDefaultChecklistStructure());
+    }
+  }, [id]);
+
+  useEffect(() => {
+    fetchOrder();
+    fetchChecklist();
+  }, [fetchOrder, fetchChecklist]);
+
+  const handleShippingFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      setProofFile(file);
+      setProofShippingFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setProofPreview(reader.result);
+        setProofShippingPreview(reader.result);
       };
       reader.readAsDataURL(file);
     }
   };
 
+  const handleDeliveryFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setProofDeliveryFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProofDeliveryPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleChecklistChange = (sectionId, itemIndex) => {
+    if (!checklist) return;
+    
+    const updatedChecklist = {
+      ...checklist,
+      sections: checklist.sections.map(section => {
+        if (section.id === sectionId) {
+          return {
+            ...section,
+            items: section.items.map((item, idx) => 
+              idx === itemIndex ? { ...item, checked: !item.checked } : item
+            )
+          };
+        }
+        return section;
+      })
+    };
+    
+    setChecklist(updatedChecklist);
+  };
+
+  const isChecklistComplete = () => {
+    if (!checklist || !checklist.sections) return false;
+    return checklist.sections.every(section =>
+      section.items.every(item => item.checked)
+    );
+  };
+
+  const handleSaveChecklist = async () => {
+    if (!checklist) return;
+    
+    try {
+      setSavingChecklist(true);
+      await orderAPI.saveKurirChecklist(id, { checklist_data: checklist });
+      alert('Checklist berhasil disimpan');
+    } catch (error) {
+      console.error('Error saving checklist:', error);
+      alert('Gagal menyimpan checklist');
+    } finally {
+      setSavingChecklist(false);
+    }
+  };
+
   const handleStartShipping = async () => {
-    if (!proofFile) {
+    if (!proofShippingFile) {
       alert('Upload bukti pengiriman terlebih dahulu');
       return;
     }
@@ -54,13 +248,13 @@ const KurirOrderDetail = () => {
       const formData = new FormData();
       formData.append('status', 'dikirim');
       formData.append('notes', notes || 'Pesanan dalam pengiriman');
-      formData.append('proof', proofFile);
+      formData.append('proof_shipping', proofShippingFile);
 
       await orderAPI.updateStatus(id, formData);
       alert('Status pesanan berhasil diupdate menjadi Dikirim');
       setNotes('');
-      setProofFile(null);
-      setProofPreview('');
+      setProofShippingFile(null);
+      setProofShippingPreview('');
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -70,7 +264,39 @@ const KurirOrderDetail = () => {
     }
   };
 
+  const handleUpdateShippingProof = async () => {
+    if (!proofShippingFile) {
+      alert('Pilih file bukti pengiriman terlebih dahulu');
+      return;
+    }
+
+    try {
+      setShipping(true);
+      const formData = new FormData();
+      formData.append('status', 'dikirim'); // Keep same status
+      formData.append('notes', notes || 'Update bukti pengiriman');
+      formData.append('proof_shipping', proofShippingFile);
+
+      await orderAPI.updateStatus(id, formData);
+      alert('Bukti pengiriman berhasil diupdate');
+      setNotes('');
+      setProofShippingFile(null);
+      setProofShippingPreview('');
+      fetchOrder();
+    } catch (error) {
+      console.error('Error updating shipping proof:', error);
+      alert(error.response?.data?.message || 'Gagal mengupdate bukti pengiriman');
+    } finally {
+      setShipping(false);
+    }
+  };
+
   const handleDelivered = async () => {
+    if (!proofDeliveryFile) {
+      alert('Upload bukti pesanan diterima terlebih dahulu');
+      return;
+    }
+
     if (!window.confirm('Konfirmasi pesanan sudah diterima pelanggan?')) return;
 
     try {
@@ -78,6 +304,7 @@ const KurirOrderDetail = () => {
       const formData = new FormData();
       formData.append('status', 'selesai');
       formData.append('notes', 'Pesanan telah diterima pelanggan');
+      formData.append('proof_delivery', proofDeliveryFile);
 
       await orderAPI.updateStatus(id, formData);
       alert('Pesanan berhasil diselesaikan!');
@@ -87,6 +314,72 @@ const KurirOrderDetail = () => {
       alert(error.response?.data?.message || 'Gagal menyelesaikan pesanan');
     } finally {
       setShipping(false);
+    }
+  };
+
+  const checkEventWarning = () => {
+    if (!order?.guest_event_date || !order?.guest_event_time) return false;
+    
+    try {
+      // Normalize date and time formats
+      const dateStr = order.guest_event_date.trim();
+      const timeStr = order.guest_event_time.trim();
+      const normalizedTime = timeStr.length === 5 ? timeStr : timeStr.substring(0, 5);
+      
+      const eventDate = new Date(`${dateStr}T${normalizedTime}`);
+      
+      // Validate date
+      if (isNaN(eventDate.getTime())) {
+        return false;
+      }
+      
+      const now = new Date();
+      const diffMs = eventDate - now;
+      const diffMinutes = diffMs / (1000 * 60);
+      
+      return diffMinutes > 0 && diffMinutes <= 30;
+    } catch (error) {
+      console.error('Error checking event warning:', error);
+      return false;
+    }
+  };
+
+  const formatEventDateTime = () => {
+    if (!order?.guest_event_date || !order?.guest_event_time) return null;
+    
+    try {
+      // Normalize date and time formats
+      const dateStr = order.guest_event_date.trim();
+      const timeStr = order.guest_event_time.trim();
+      
+      // Ensure time format is HH:MM or HH:MM:SS
+      const normalizedTime = timeStr.length === 5 ? timeStr : timeStr.substring(0, 5);
+      
+      // Create date object
+      const eventDate = new Date(`${dateStr}T${normalizedTime}`);
+      
+      // Validate date
+      if (isNaN(eventDate.getTime())) {
+        console.error('Invalid date format:', { date: dateStr, time: timeStr });
+        return null;
+      }
+      
+      return {
+        date: eventDate.toLocaleDateString('id-ID', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        }),
+        time: eventDate.toLocaleTimeString('id-ID', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
+        fullDateTime: eventDate.toLocaleString('id-ID')
+      };
+    } catch (error) {
+      console.error('Error formatting event date/time:', error);
+      return null;
     }
   };
 
@@ -150,6 +443,32 @@ const KurirOrderDetail = () => {
               </div>
 
               <div className="space-y-4">
+                {(() => {
+                  const eventDateTime = formatEventDateTime();
+                  if (!eventDateTime) return null;
+                  
+                  return (
+                    <div className={`rounded-lg p-4 ${checkEventWarning() ? 'bg-yellow-50 border-2 border-yellow-400' : 'bg-blue-50'}`}>
+                      <h3 className="font-semibold text-gray-900 mb-2 flex items-center">
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Tanggal & Waktu Acara:
+                      </h3>
+                      <p className="text-gray-700 font-medium">{eventDateTime.date}</p>
+                      <p className="text-gray-700 font-medium">{eventDateTime.time}</p>
+                      {checkEventWarning() && (
+                        <div className="mt-2 p-2 bg-yellow-200 rounded flex items-center gap-2">
+                          <svg className="w-5 h-5 text-yellow-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <span className="text-yellow-800 font-semibold">Pesanan harus segera tiba</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h3 className="font-semibold text-gray-900 mb-2">Penerima:</h3>
                   <p className="text-gray-700 font-medium">{order.customer_name}</p>
@@ -246,16 +565,20 @@ const KurirOrderDetail = () => {
                         </div>
                         <p className="text-sm text-gray-700 mt-1">Oleh: {log.handler_name || 'System'}</p>
                         {log.notes && <p className="text-sm text-gray-600 mt-1">{log.notes}</p>}
-                        {log.proof_url && (
+                        {(log.proof_image_url || log.proof_url) && (
                           <div className="mt-2">
-                            <a
-                              href={log.proof_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary-600 hover:text-primary-700 text-sm"
+                            <button
+                              onClick={() => {
+                                setViewingImage(log.proof_image_url || log.proof_url);
+                                setImageViewerOpen(true);
+                              }}
+                              className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1"
                             >
-                              Lihat Bukti →
-                            </a>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              Lihat Foto
+                            </button>
                           </div>
                         )}
                       </div>
@@ -288,19 +611,19 @@ const KurirOrderDetail = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Upload Bukti (Resi/Foto) *
+                      Upload Bukti Pengiriman *
                     </label>
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={handleFileChange}
+                      onChange={handleShippingFileChange}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     />
-                    {proofPreview && (
+                    {proofShippingPreview && (
                       <div className="mt-2">
                         <img
-                          src={proofPreview}
-                          alt="Preview"
+                          src={proofShippingPreview}
+                          alt="Preview Bukti Pengiriman"
                           className="w-full h-48 object-cover rounded-lg"
                         />
                       </div>
@@ -309,7 +632,7 @@ const KurirOrderDetail = () => {
 
                   <button
                     onClick={handleStartShipping}
-                    disabled={!proofFile || shipping}
+                    disabled={!proofShippingFile || shipping}
                     className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 font-semibold transition"
                   >
                     {shipping ? 'Memproses...' : 'Mulai Kirim Pesanan'}
@@ -319,33 +642,202 @@ const KurirOrderDetail = () => {
             )}
 
             {order.status === 'dikirim' && (
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Konfirmasi Penerimaan</h2>
-                <p className="text-sm text-gray-600 mb-4">
-                  Klik tombol di bawah setelah pesanan diterima oleh pelanggan
-                </p>
-                <button
-                  onClick={handleDelivered}
-                  disabled={shipping}
-                  className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-semibold transition"
-                >
-                  {shipping ? 'Memproses...' : 'Pesanan Diterima'}
-                </button>
-              </div>
+              <>
+                {/* Upload Bukti Pengiriman */}
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Bukti Pengiriman</h2>
+                  
+                  <div className="space-y-4">
+                    {proofShippingExisting && (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Bukti Pengiriman yang Sudah Diupload:
+                        </label>
+                        <div className="relative">
+                          <img
+                            src={proofShippingExisting}
+                            alt="Bukti Pengiriman"
+                            className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-80 transition"
+                            onClick={() => {
+                              setViewingImage(proofShippingExisting);
+                              setImageViewerOpen(true);
+                            }}
+                          />
+                          <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                            Sudah Diupload
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {proofShippingExisting ? 'Update Bukti Pengiriman' : 'Upload Bukti Pengiriman'}
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleShippingFileChange}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                      />
+                      {proofShippingPreview && (
+                        <div className="mt-2">
+                          <img
+                            src={proofShippingPreview}
+                            alt="Preview Bukti Pengiriman"
+                            className="w-full h-48 object-cover rounded-lg"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {proofShippingFile && (
+                      <button
+                        onClick={handleUpdateShippingProof}
+                        disabled={shipping}
+                        className="w-full bg-purple-600 text-white px-4 py-3 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 font-semibold transition"
+                      >
+                        {shipping ? 'Memproses...' : proofShippingExisting ? 'Update Bukti Pengiriman' : 'Upload Bukti Pengiriman'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upload Bukti Pesanan Diterima */}
+                <div className="bg-white rounded-xl shadow-lg p-6">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Pesanan Diterima</h2>
+                  
+                  <div className="space-y-4">
+                    {proofDeliveryExisting && (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Bukti Pesanan Diterima yang Sudah Diupload:
+                        </label>
+                        <div className="relative">
+                          <img
+                            src={proofDeliveryExisting}
+                            alt="Bukti Pesanan Diterima"
+                            className="w-full h-48 object-cover rounded-lg cursor-pointer hover:opacity-80 transition"
+                            onClick={() => {
+                              setViewingImage(proofDeliveryExisting);
+                              setImageViewerOpen(true);
+                            }}
+                          />
+                          <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded text-xs font-semibold">
+                            Sudah Diupload
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Upload Bukti Pesanan Diterima *
+                      </label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleDeliveryFileChange}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                      />
+                      {proofDeliveryPreview && (
+                        <div className="mt-2">
+                          <img
+                            src={proofDeliveryPreview}
+                            alt="Preview Bukti Diterima"
+                            className="w-full h-48 object-cover rounded-lg"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={handleDelivered}
+                      disabled={!proofDeliveryFile || shipping}
+                      className="w-full bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-400 font-semibold transition"
+                    >
+                      {shipping ? 'Memproses...' : 'Pesanan Diterima'}
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
 
-            <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg">
-              <h3 className="text-sm font-semibold text-gray-900 mb-2">Checklist Kurir:</h3>
-              <ul className="text-xs text-gray-700 space-y-1">
-                <li>✓ Periksa kelengkapan pesanan</li>
-                <li>✓ Catat nomor kontak pelanggan</li>
-                <li>✓ Upload bukti pengiriman</li>
-                <li>✓ Konfirmasi penerimaan</li>
-              </ul>
+            {/* Checklist Tim Kurir */}
+            {checklist && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">Checklist Tim Kurir / Pengiriman</h2>
+                  {isChecklistComplete() && (
+                    <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
+                      ✓ Lengkap
+                    </span>
+                  )}
+                </div>
+                
+                <div className="space-y-6">
+                  {checklist.sections?.map((section, sectionIdx) => (
+                    <div key={section.id || sectionIdx} className="border rounded-lg p-4 bg-gray-50">
+                      <h3 className="font-semibold text-sm text-gray-900 mb-3 flex items-center">
+                        <span className="w-6 h-6 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center text-sm font-bold mr-2">
+                          {sectionIdx + 1}
+                        </span>
+                        {section.title}
+                      </h3>
+                      <div className="space-y-2">
+                        {section.items?.map((item, itemIdx) => (
+                          <label key={item.id || itemIdx} className="flex items-start space-x-3 cursor-pointer hover:bg-white p-2 rounded transition">
+                            <div className="flex items-center h-5">
+                              <input
+                                type="checkbox"
+                                checked={item.checked || false}
+                                onChange={() => handleChecklistChange(section.id, itemIdx)}
+                                className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                disabled={savingChecklist}
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <span className={`text-sm ${item.checked ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
+                                {item.text}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={handleSaveChecklist}
+                    disabled={savingChecklist}
+                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-semibold transition text-sm"
+                  >
+                    {savingChecklist ? 'Menyimpan...' : 'Simpan Checklist'}
+                  </button>
+                  {isChecklistComplete() && (
+                    <div className="flex-1 bg-green-50 border border-green-200 rounded-lg flex items-center justify-center">
+                      <span className="text-green-700 text-sm font-semibold">✓ Siap Dikirim</span>
+                    </div>
+                  )}
+                </div>
             </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Image Viewer Modal */}
+      <ImageViewer
+        imageUrl={viewingImage}
+        isOpen={imageViewerOpen}
+        onClose={() => {
+          setImageViewerOpen(false);
+          setViewingImage(null);
+        }}
+        title="Bukti Foto"
+      />
     </DashboardLayout>
   );
 };

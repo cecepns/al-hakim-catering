@@ -4,30 +4,36 @@ import { toast } from 'react-toastify';
 import { MapPin, Calendar, Clock, FileCheck, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, CheckCircle2, User } from 'lucide-react';
 import { orderAPI, productAPI } from '../utils/api';
 import { formatRupiah } from '../utils/formatHelper';
+import { useAuth } from '../context/AuthContext';
 
 const Checkout = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [formData, setFormData] = useState({
-    reference: '',
+    reference: user?.role === 'marketing' ? 'marketing' : '',
     reference_detail: '',
     event_name: '',
     event_date: '',
     event_time: '',
     delivery_type: 'diambil',
-    customer_name: '',
-    wa_number_1: '',
+    customer_name: user?.name || '',
+    wa_number_1: user?.phone || '',
     wa_number_2: '',
-    delivery_address: '',
+    delivery_address: user?.address || '',
     landmark: '',
     sharelok_link: '',
     payment_method: 'transfer',
+    payment_amount: '',
     payment_proof: null,
+    partner_business_name: '',
+    partner_wa_number: '',
     notes: '',
     verification: false,
+    margin_amount: '', // For marketing users
   });
 
   useEffect(() => {
@@ -68,7 +74,9 @@ const Checkout = () => {
   const calculateTotal = () => {
     if (!product) return 0;
     const price = product.discounted_price || product.price;
-    return price * quantity;
+    const baseTotal = price * quantity;
+    const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
+    return baseTotal + marginAmount;
   };
 
   const handleSubmit = async (e) => {
@@ -99,6 +107,8 @@ const Checkout = () => {
     try {
       setLoading(true);
       
+      const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
+      
       const formDataToSend = new FormData();
       formDataToSend.append('items', JSON.stringify([{
         product_id: product.id,
@@ -117,9 +127,14 @@ const Checkout = () => {
         wa_number_2: formData.wa_number_2,
         landmark: formData.landmark,
         sharelok_link: formData.sharelok_link,
+        payment_amount: formData.payment_amount || null,
+        partner_business_name: formData.partner_business_name || null,
+        partner_wa_number: formData.partner_wa_number || null,
         notes: formData.notes,
+        margin_amount: marginAmount,
       }));
       formDataToSend.append('payment_method', formData.payment_method);
+      formDataToSend.append('margin_amount', marginAmount.toString());
       
       if (formData.payment_proof) {
         formDataToSend.append('payment_proof', formData.payment_proof);
@@ -146,7 +161,6 @@ const Checkout = () => {
     );
   }
 
-  const total = calculateTotal();
   const price = product.discounted_price || product.price;
 
   return (
@@ -187,6 +201,33 @@ const Checkout = () => {
                 className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 required
               />
+            )}
+            {/* Show partner fields for marketing users or when reference is marketing */}
+            {(user?.role === 'marketing' || formData.reference === 'marketing') && (
+              <div className="mt-4 space-y-4 border-t pt-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nama usaha mitra:
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.partner_business_name}
+                    onChange={(e) => handleInputChange('partner_business_name', e.target.value)}
+                    placeholder="Nama usaha mitra..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> Nomer WA mitra:</label>
+                  <input
+                    type="tel"
+                    value={formData.partner_wa_number}
+                    onChange={(e) => handleInputChange('partner_wa_number', e.target.value)}
+                    placeholder="08xxxxxxxxxx"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+              </div>
             )}
           </div>
 
@@ -369,9 +410,35 @@ const Checkout = () => {
                 <span>Harga Satuan:</span>
                 <span className="font-medium">Rp {formatRupiah(price)}</span>
               </div>
+              {/* Marketing Margin */}
+              {user?.role === 'marketing' && (
+                <div className="border-t pt-2">
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Margin Tambahan (akan ditambahkan ke total yang ditagih ke customer)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.margin_amount || ''}
+                    onChange={(e) => handleInputChange('margin_amount', e.target.value)}
+                    min="0"
+                    step="1000"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    placeholder="0"
+                  />
+                  {formData.margin_amount && parseFloat(formData.margin_amount) > 0 && (
+                    <div className="flex justify-between text-green-600 text-sm mt-1">
+                      <span>Margin Tambahan:</span>
+                      <span>+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Komisi Anda = Komisi dari Admin (otomatis) + Margin ini
+                  </p>
+                </div>
+              )}
               <div className="flex justify-between text-xl font-bold text-primary-600 pt-2 border-t">
                 <span>TOTAL:</span>
-                <span>Rp {formatRupiah(total)}</span>
+                <span>Rp {formatRupiah(calculateTotal())}</span>
               </div>
               <p className="text-sm text-gray-500 mt-2">* Harga belum termasuk ongkir</p>
             </div>
@@ -412,6 +479,23 @@ const Checkout = () => {
                   )}
                   {formData.payment_method === method.value && method.requiresProof && (
                     <div className="mt-3 ml-7">
+                      {(method.value === 'transfer' || method.value === 'dp' || method.value === 'tunai') && (
+                        <div className="mb-3">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            {method.value === 'dp' ? 'Nominal DP:' : method.value === 'transfer' ? 'Nominal Transfer:' : 'Nominal Pembayaran:'}
+                          </label>
+                          <input
+                            type="number"
+                            value={formData.payment_amount}
+                            onChange={(e) => handleInputChange('payment_amount', e.target.value)}
+                            placeholder={`Masukkan nominal ${method.value === 'dp' ? 'DP' : method.value === 'transfer' ? 'transfer' : 'pembayaran'}`}
+                            min="0"
+                            step="1000"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                            required={formData.payment_method === method.value}
+                          />
+                        </div>
+                      )}
                       <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Upload size={16} /> {method.proofLabel}</label>
                       <input
                         type="file"

@@ -88,6 +88,12 @@ export const orderAPI = {
   // Kitchen Checklist
   getChecklist: (id) => api.get(`/orders/${id}/kitchen-checklist`),
   saveChecklist: (id, data) => api.post(`/orders/${id}/kitchen-checklist`, data),
+  // Kurir Checklist
+  getKurirChecklist: (id) => api.get(`/orders/${id}/kurir-checklist`),
+  saveKurirChecklist: (id, data) => api.post(`/orders/${id}/kurir-checklist`, data),
+  // Operasional Checklist
+  getOperasionalChecklist: (date) => api.get(`/operasional/checklist/${date}`),
+  saveOperasionalChecklist: (date, data) => api.post(`/operasional/checklist/${date}`, data),
 };
 
 export const voucherAPI = {

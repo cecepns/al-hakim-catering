@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import ImageViewer from '../../components/ImageViewer';
 
 const AdminOrderDetail = () => {
   const { id } = useParams();
@@ -13,6 +14,8 @@ const AdminOrderDetail = () => {
   const [statusModal, setStatusModal] = useState(false);
   const [newStatus, setNewStatus] = useState('');
   const [notes, setNotes] = useState('');
+  const [viewingImage, setViewingImage] = useState(null);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -239,6 +242,22 @@ const AdminOrderDetail = () => {
                         {log.notes && (
                           <p className="text-sm text-gray-600 mt-1">{log.notes}</p>
                         )}
+                        {(log.proof_image_url || log.proof_url) && (
+                          <div className="mt-2">
+                            <button
+                              onClick={() => {
+                                setViewingImage(log.proof_image_url || log.proof_url);
+                                setImageViewerOpen(true);
+                              }}
+                              className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              Lihat Foto
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -315,6 +334,17 @@ const AdminOrderDetail = () => {
             </div>
           </div>
         )}
+
+        {/* Image Viewer Modal */}
+        <ImageViewer
+          imageUrl={viewingImage}
+          isOpen={imageViewerOpen}
+          onClose={() => {
+            setImageViewerOpen(false);
+            setViewingImage(null);
+          }}
+          title="Bukti Foto"
+        />
       </div>
     </DashboardLayout>
   );

@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { commissionAPI } from '../../utils/api';
-import { useAuth } from '../../context/AuthContext';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const MarketingDashboard = () => {
-  const { user } = useAuth();
   const [commission, setCommission] = useState({
     balance: 0,
     thisMonth: 0,
@@ -226,16 +224,86 @@ const MarketingDashboard = () => {
             <svg className="w-6 h-6 text-primary-600 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Tips untuk Marketing
+            <div className="w-full">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Prosedur & Peraturan Marketing Al-Hakim
               </h3>
-              <ul className="text-gray-700 space-y-1 text-sm">
-                <li>• Anda dapat menetapkan harga sendiri dengan menambahkan margin</li>
-                <li>• Komisi otomatis dihitung berdasarkan penjualan yang berhasil</li>
-                <li>• Promosikan produk ke pelanggan Anda untuk meningkatkan komisi</li>
-                <li>• Pantau performa penjualan Anda secara real-time</li>
+              
+              <div className="space-y-4 text-sm text-gray-700">
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">1. STRUKTUR PEMASARAN</h4>
+                  <p className="mb-2">Terdapat tiga kategori dalam sistem pemasaran Al-Hakim:</p>
+                  <ul className="list-disc list-inside space-y-1 ml-4">
+                    <li><strong>Marketing Resmi</strong> - Adalah pegawai atau tim internal Al-Hakim yang bertugas langsung mempromosikan produk, checkout pesanan di sistem, dan melakukan follow-up pelanggan.</li>
+                    <li><strong>Reseller</strong> - Adalah pihak luar yang menjual kembali produk Al-Hakim dengan menaikkan harga (margin).</li>
+                    <li><strong>Mitra Resmi</strong> - Adalah pihak luar yang berizin resmi menggunakan sistem, katalog, dan konten promosi Al-Hakim, dengan sistem komisi tetap tanpa menaikkan harga.</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">2. PROSEDUR MARKETING RESMI</h4>
+                  <ol className="list-decimal list-inside space-y-1 ml-4">
+                    <li>Wajib memantau target penjualan mingguan/bulanan yang ditetapkan oleh manajemen.</li>
+                    <li>Komisi hanya dapat diambil jika target penjualan tercapai minimal sesuai ketentuan yang berlaku.</li>
+                    <li>Setiap transaksi harus dicatat melalui sistem resmi (dashboard admin/marketing).</li>
+                    <li>Tidak diperkenankan melakukan transaksi di luar sistem atau menggunakan rekening pribadi tanpa izin.</li>
+                    <li>Marketing resmi wajib memberikan laporan progres penjualan secara rutin ke bagian operasional.</li>
+                    <li>Dilarang mengubah harga jual, bonus, atau promo tanpa persetujuan manajemen.</li>
+                    <li>Wajib menjaga citra dan komunikasi profesional atas nama Al-Hakim.</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">3. PROSEDUR RESELLER</h4>
+                  <ol className="list-decimal list-inside space-y-1 ml-4">
+                    <li>Reseller boleh menaikkan harga dari harga dasar yang ditetapkan Al-Hakim, dengan margin sesuai kebijakan masing-masing.</li>
+                    <li>Produk yang dikirim ke pembeli tidak memakai branding Al-Hakim.</li>
+                    <li>Reseller bertanggung jawab penuh terhadap pelayanan pelanggan mereka sendiri.</li>
+                    <li>Transaksi harus tetap melalui sistem resmi agar stok dan data pesanan terpantau.</li>
+                    <li>Reseller berhak atas komisi tambahan dari sistem Al-Hakim dan keuntungan yang diambil dari margin harga.</li>
+                    <li>Dilarang menjual di bawah harga dasar resmi agar tidak merusak pasar.</li>
+                    <li>Dilarang menggunakan nama &quot;Al-Hakim&quot; di toko online tanpa izin tertulis dari manajemen.</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">4. PROSEDUR MITRA RESMI</h4>
+                  <ol className="list-decimal list-inside space-y-1 ml-4">
+                    <li>Mitra resmi boleh menggunakan seluruh konten promosi, foto, caption, dan materi iklan resmi dari Al-Hakim.</li>
+                    <li>Tidak diperkenankan menaikkan atau menurunkan harga dari harga resmi Al-Hakim.</li>
+                    <li>Komisi diperoleh dari setiap transaksi yang berhasil.</li>
+                    <li>Semua transaksi wajib melalui dashboard resmi agar sistem dapat mencatat komisi secara otomatis.</li>
+                    <li>Mitra wajib menjaga keaslian informasi produk dan tidak memodifikasi konten yang dapat menyesatkan.</li>
+                    <li>Dilarang menjual produk Al-Hakim dengan mengubah nama merek, label, atau kemasan.</li>
+                    <li>Dilarang membeli produk di tempat lain</li>
+                    <li>Jika terjadi pelanggaran harga atau penyalahgunaan konten, status kemitraan dapat dicabut.</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">5. KETENTUAN KOMISI DAN TARGET</h4>
+                  <ol className="list-decimal list-inside space-y-1 ml-4">
+                    <li>Pembayaran komisi dilakukan setiap saat (Minimal komisi yang dapat di tarik: 50.000)</li>
+                    <li>Penjualan palsu atau pesanan fiktif akan membatalkan hak komisi.</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">6. PERATURAN UMUM</h4>
+                  <ol className="list-decimal list-inside space-y-1 ml-4">
+                    <li>Semua pihak wajib menjunjung integritas dan kejujuran dalam promosi serta transaksi.</li>
+                    <li>Penggunaan nama, logo, dan materi promosi Al-Hakim hanya untuk tujuan pemasaran resmi dan tidak boleh disalahgunakan.</li>
+                    <li>Setiap pelanggaran SOP, manipulasi data, atau pelanggaran harga dapat dikenai sanksi berupa:
+                      <ul className="list-disc list-inside ml-6 mt-1">
+                        <li>Peringatan tertulis</li>
+                        <li>Pemotongan komisi</li>
+                        <li>Pemblokiran akun marketing/reseller/mitra</li>
               </ul>
+                    </li>
+                    <li>Semua pihak wajib mematuhi pedoman komunikasi sopan dan ramah kepada pelanggan.</li>
+                  </ol>
+                </div>
+              </div>
             </div>
           </div>
         </div>

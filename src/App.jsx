@@ -43,7 +43,10 @@ import MarketingCommission from './pages/marketing/Commission';
 
 // Operasional Pages
 import OperasionalDashboard from './pages/operasional/Dashboard';
+import OperasionalOrders from './pages/operasional/Orders';
 import OperasionalOrderDetail from './pages/operasional/OrderDetail';
+import OperasionalStatusFlow from './pages/operasional/StatusFlow';
+import OperasionalChecklist from './pages/operasional/Checklist';
 
 // Dapur Pages
 import DapurDashboard from './pages/dapur/Dashboard';
@@ -290,10 +293,34 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/operasional/orders"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <OperasionalOrders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/operasional/orders/:id"
         element={
           <ProtectedRoute allowedRoles={['operasional']}>
             <OperasionalOrderDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/operasional/status-flow"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <OperasionalStatusFlow />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/operasional/checklist"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <OperasionalChecklist />
           </ProtectedRoute>
         }
       />

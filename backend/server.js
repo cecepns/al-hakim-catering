@@ -480,6 +480,21 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       console.error('Error parsing delivery_notes:', e);
     }
 
+    // Payment amount and marketing partner info: will be extracted and stored in separate columns
+    // Also kept in delivery_notes JSON for backward compatibility
+    if (req.body.payment_amount && !guestData.payment_amount) {
+      guestData.payment_amount = req.body.payment_amount;
+      delivery_notes = JSON.stringify(guestData);
+    }
+    if (req.body.partner_business_name && !guestData.partner_business_name) {
+      guestData.partner_business_name = req.body.partner_business_name;
+      delivery_notes = JSON.stringify(guestData);
+    }
+    if (req.body.partner_wa_number && !guestData.partner_wa_number) {
+      guestData.partner_wa_number = req.body.partner_wa_number;
+      delivery_notes = JSON.stringify(guestData);
+    }
+
     let total_amount = 0;
     const orderItems = [];
 
@@ -527,23 +542,30 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       eventTime = guestData.event_time;
     }
 
+    // Extract payment amount and partner info from delivery_notes
+    const payment_amount = guestData.payment_amount ? parseFloat(guestData.payment_amount) : null;
+    const partner_business_name = guestData.partner_business_name || null;
+    const partner_wa_number = guestData.partner_wa_number || null;
+
     const [orderResult] = await connection.query(
       `INSERT INTO orders (
         user_id, total_amount, discount_amount, cashback_used, final_amount, 
-        payment_method, delivery_address, delivery_notes,
+        payment_method, payment_amount, delivery_address, delivery_notes,
         guest_customer_name, guest_wa_number_1, guest_wa_number_2,
-        guest_reference, guest_reference_detail,
+        guest_reference, guest_reference_detail, partner_business_name, partner_wa_number,
         guest_event_name, guest_event_date, guest_event_time,
         guest_sharelok_link, guest_landmark, guest_delivery_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         guestUserId, total_amount, 0, 0, final_amount, 
-        payment_method, delivery_address, delivery_notes,
+        payment_method, payment_amount, delivery_address, delivery_notes,
         guestData.customer_name || null,
         guestData.wa_number_1 || null,
         guestData.wa_number_2 || null,
         guestData.reference || null,
         guestData.reference_detail || null,
+        partner_business_name,
+        partner_wa_number,
         guestData.event_name || null,
         eventDate,
         eventTime,
@@ -630,10 +652,30 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
     if (delivery_notes) {
       try {
         guestData = typeof delivery_notes === 'string' ? JSON.parse(delivery_notes) : delivery_notes;
-      } catch (e) {
+      } catch {
         // If not JSON, treat as plain text
         guestData = {};
       }
+    }
+
+    // Payment amount and marketing partner info: will be extracted and stored in separate columns
+    // Also kept in delivery_notes JSON for backward compatibility
+    if (req.body.payment_amount && !guestData.payment_amount) {
+      guestData.payment_amount = req.body.payment_amount;
+    }
+    if (req.body.partner_business_name && !guestData.partner_business_name) {
+      guestData.partner_business_name = req.body.partner_business_name;
+    }
+    if (req.body.partner_wa_number && !guestData.partner_wa_number) {
+      guestData.partner_wa_number = req.body.partner_wa_number;
+    }
+
+    // Get margin_amount for marketing users (from request body or delivery_notes)
+    let margin_amount = 0;
+    if (req.body.margin_amount) {
+      margin_amount = parseFloat(req.body.margin_amount) || 0;
+    } else if (guestData.margin_amount) {
+      margin_amount = parseFloat(guestData.margin_amount) || 0;
     }
 
     let total_amount = 0;
@@ -703,7 +745,9 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
     }
 
-    const final_amount = total_amount - discount_amount - (cashback_used || 0);
+    // Calculate base_amount (before margin) and final_amount (with margin)
+    const base_amount = total_amount - discount_amount - (cashback_used || 0);
+    const final_amount = base_amount + margin_amount;
 
     // Parse event_date dan event_time untuk kolom terpisah (if guestData exists)
     let eventDate = null;
@@ -721,23 +765,33 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       ? delivery_notes 
       : (Object.keys(guestData).length > 0 ? JSON.stringify(guestData) : (delivery_notes || ''));
 
+    // Extract payment amount and partner info from delivery_notes
+    const payment_amount = guestData.payment_amount ? parseFloat(guestData.payment_amount) : null;
+    const partner_business_name = guestData.partner_business_name || null;
+    const partner_wa_number = guestData.partner_wa_number || null;
+
+    // Set marketing_id if user is marketing
+    const marketing_id = req.user.role === 'marketing' ? req.user.id : null;
+
     const [orderResult] = await connection.query(
       `INSERT INTO orders (
-        user_id, voucher_id, total_amount, discount_amount, cashback_used, final_amount, 
-        payment_method, delivery_address, delivery_notes,
+        user_id, marketing_id, voucher_id, total_amount, base_amount, discount_amount, cashback_used, final_amount, margin_amount,
+        payment_method, payment_amount, delivery_address, delivery_notes,
         guest_customer_name, guest_wa_number_1, guest_wa_number_2,
-        guest_reference, guest_reference_detail,
+        guest_reference, guest_reference_detail, partner_business_name, partner_wa_number,
         guest_event_name, guest_event_date, guest_event_time,
         guest_sharelok_link, guest_landmark, guest_delivery_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        req.user.id, voucher_id, total_amount, discount_amount, cashback_used || 0, final_amount,
-        payment_method, delivery_address, deliveryNotesJson,
+        req.user.id, marketing_id, voucher_id, total_amount, base_amount, discount_amount, cashback_used || 0, final_amount, margin_amount,
+        payment_method, payment_amount, delivery_address, deliveryNotesJson,
         guestData.customer_name || null,
         guestData.wa_number_1 || null,
         guestData.wa_number_2 || null,
         guestData.reference || null,
         guestData.reference_detail || null,
+        partner_business_name,
+        partner_wa_number,
         guestData.event_name || null,
         eventDate,
         eventTime,
@@ -793,9 +847,26 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat dengan bukti pembayaran', proofImageUrl]
       );
     } else {
+    await connection.query(
+      'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
+      [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
+    );
+    }
+
+    // Create commission record if user is marketing
+    if (marketing_id) {
+      // Get commission_percentage from user
+      const [users] = await connection.query('SELECT commission_percentage FROM users WHERE id = ?', [marketing_id]);
+      const commission_percentage = users.length > 0 && users[0].commission_percentage ? parseFloat(users[0].commission_percentage) : 0;
+      
+      // Calculate commission: (base_amount * commission_percentage / 100) + margin_amount
+      const admin_commission = (base_amount * commission_percentage) / 100;
+      const commission_amount = admin_commission + margin_amount;
+
       await connection.query(
-        'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
-        [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
+        `INSERT INTO commissions (marketing_id, order_id, base_amount, commission_percentage, commission_amount, status) 
+         VALUES (?, ?, ?, ?, ?, 'pending')`,
+        [marketing_id, orderId, base_amount, commission_percentage, commission_amount]
       );
     }
 
@@ -814,10 +885,28 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
   }
 });
 
-app.put('/api/orders/:id/status', authenticateToken, upload.single('proof'), async (req, res) => {
+app.put('/api/orders/:id/status', authenticateToken, upload.fields([
+  { name: 'proof', maxCount: 1 },
+  { name: 'proof_shipping', maxCount: 1 },
+  { name: 'proof_delivery', maxCount: 1 }
+]), async (req, res) => {
   try {
     const { status, notes } = req.body;
-    const proof_image_url = req.file ? `/uploads/${req.file.filename}` : null;
+    
+    let proof_image_url = null;
+    
+    // Handle proof (single file - for dapur/operasional)
+    if (req.files && req.files.proof && req.files.proof[0]) {
+      proof_image_url = `/uploads/${req.files.proof[0].filename}`;
+    }
+    // Handle proof_shipping (for status 'dikirim' - kurir)
+    else if (req.files && req.files.proof_shipping && req.files.proof_shipping[0]) {
+      proof_image_url = `/uploads/${req.files.proof_shipping[0].filename}`;
+    }
+    // Handle proof_delivery (for status 'selesai' - kurir)
+    else if (req.files && req.files.proof_delivery && req.files.proof_delivery[0]) {
+      proof_image_url = `/uploads/${req.files.proof_delivery[0].filename}`;
+    }
 
     await pool.query('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
 
@@ -1466,6 +1555,56 @@ app.put('/api/users/:id/role', authenticateToken, authorizeRole('admin'), async 
 });
 
 // ========================================
+// KURIR CHECKLIST ENDPOINTS
+// ========================================
+app.get('/api/orders/:id/kurir-checklist', authenticateToken, async (req, res) => {
+  try {
+    const [checklists] = await pool.query(
+      'SELECT * FROM kurir_checklists WHERE order_id = ? ORDER BY created_at DESC LIMIT 1',
+      [req.params.id]
+    );
+
+    if (checklists.length === 0) {
+      // Return default empty checklist if none exists
+      return res.json({ checklist_data: getDefaultKurirChecklist(), order_id: req.params.id });
+    }
+
+    res.json(checklists[0]);
+  } catch (error) {
+    console.error('Get kurir checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/orders/:id/kurir-checklist', authenticateToken, async (req, res) => {
+  try {
+    const { checklist_data } = req.body;
+    const orderId = req.params.id;
+    const userId = req.user.id;
+
+    // Check if order exists
+    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    // Insert or update checklist
+    const [result] = await pool.query(
+      'INSERT INTO kurir_checklists (order_id, checklist_data, saved_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, saved_by = ?, updated_at = NOW()',
+      [orderId, JSON.stringify(checklist_data), userId, JSON.stringify(checklist_data), userId]
+    );
+
+    res.status(201).json({
+      message: 'Checklist berhasil disimpan',
+      checklist_id: result.insertId || result.affectedRows
+    });
+  } catch (error) {
+    console.error('Save kurir checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
+});
+
+// ========================================
 // KITCHEN CHECKLIST ENDPOINTS
 // ========================================
 app.get('/api/orders/:id/kitchen-checklist', authenticateToken, async (req, res) => {
@@ -1515,12 +1654,300 @@ app.post('/api/orders/:id/kitchen-checklist', authenticateToken, async (req, res
   }
 });
 
+// ========================================
+// OPERASIONAL CHECKLIST ENDPOINTS
+// ========================================
+app.get('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
+  try {
+    const shiftDate = req.params.date;
+    const userId = req.user.id;
+
+    const [checklists] = await pool.query(
+      'SELECT * FROM operasional_checklists WHERE shift_date = ? AND saved_by = ? ORDER BY created_at DESC LIMIT 1',
+      [shiftDate, userId]
+    );
+
+    if (checklists.length === 0) {
+      // Return default empty checklist if none exists
+      return res.json({ checklist_data: getDefaultOperasionalChecklist(), shift_date: shiftDate });
+    }
+
+    // Parse checklist_data if it's a string
+    let checklistData = checklists[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+
+    res.json({
+      ...checklists[0],
+      checklist_data: checklistData
+    });
+  } catch (error) {
+    console.error('Get operasional checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
+  try {
+    const { checklist_data } = req.body;
+    const shiftDate = req.params.date;
+    const userId = req.user.id;
+
+    // Insert or update checklist
+    const [result] = await pool.query(
+      'INSERT INTO operasional_checklists (shift_date, checklist_data, saved_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, updated_at = NOW()',
+      [shiftDate, JSON.stringify(checklist_data), userId, JSON.stringify(checklist_data)]
+    );
+
+    res.status(201).json({
+      message: 'Checklist berhasil disimpan',
+      checklist_id: result.insertId || result.affectedRows
+    });
+  } catch (error) {
+    console.error('Save operasional checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({ message: 'API Al Hakim Catering berjalan dengan baik!' });
 });
 
 app.listen(PORT, () => {
   console.log(`Server berjalan di http://localhost:${PORT}`);
+});
+
+// Helper function to return default operasional checklist structure
+function getDefaultOperasionalChecklist() {
+  return {
+    sections: [
+      {
+        id: 'section1',
+        title: '1. CEK DASHBOARD UTAMA SETIAP AWAL SHIFT',
+        items: [
+          { id: 'item_1', text: 'Login ke dashboard admin operasional menggunakan akun resmi.', checked: false },
+          { id: 'item_2', text: 'Periksa tampilan ringkasan: Jumlah pesanan baru hari ini, Pesanan yang sedang diproses, Pesanan dalam pengiriman, Pesanan selesai, Jumlah review yang masuk', checked: false },
+          { id: 'item_3', text: 'Pastikan tidak ada error data atau status yang tidak sinkron antar dashboard.', checked: false },
+        ]
+      },
+      {
+        id: 'section2',
+        title: '2. MONITOR PESANAN BARU',
+        items: [
+          { id: 'item_1', text: 'Cek tab Pesanan Baru di dashboard.', checked: false },
+          { id: 'item_2', text: 'Verifikasi data pelanggan & pesanan (tanggal, lokasi, jumlah, jenis produk).', checked: false },
+          { id: 'item_3', text: 'Cek status pembayaran: lunas / DP / belum bayar.', checked: false },
+          { id: 'item_4', text: 'Tugaskan ke tim untuk memproses pesanan', checked: false },
+          { id: 'item_5', text: 'Pastikan status otomatis berubah ke "Sedang Diproses" apabila pesanan selesai diproses.', checked: false },
+          { id: 'item_6', text: 'Kirim konfirmasi ke pelanggan melalui WhatsApp, jika perlu.', checked: false },
+        ]
+      },
+      {
+        id: 'section3',
+        title: '3. MONITOR PROSES DAPUR',
+        items: [
+          { id: 'item_1', text: 'Cek status bahan & progress (persiapan, masak, siap kemas).', checked: false },
+          { id: 'item_2', text: 'Pastikan tidak ada pesanan yang tertahan lebih dari batas waktu SOP.', checked: false },
+          { id: 'item_3', text: 'Jika ada kendala (bahan habis, alat rusak, dll) segera diselesaikan', checked: false },
+          { id: 'item_4', text: 'Tandai pesanan "Siap Dikirim" setelah diverifikasi kualitas & jumlahnya.', checked: false },
+        ]
+      },
+      {
+        id: 'section4',
+        title: '🚚 4. MONITOR PENGIRIMAN',
+        items: [
+          { id: 'item_1', text: 'Pastikan dashboard kurir sudah menerima notifikasi "Siap Dikirim".', checked: false },
+          { id: 'item_2', text: 'Tentukan kurir yang bertugas & rute (cek fitur assign kurir).', checked: false },
+          { id: 'item_3', text: 'Pastikan kurir: Membawa nota & nomor pelanggan, Menyiapkan jas hujan, plastik pelindung, dan perlengkapan keamanan', checked: false },
+          { id: 'item_4', text: 'Pastikan status berubah otomatis ke "Dalam Pengiriman".', checked: false },
+          { id: 'item_5', text: 'Konfirmasi penerimaan dari pembeli saat pesanan sampai.', checked: false },
+        ]
+      },
+      {
+        id: 'section5',
+        title: '5. MONITOR PESANAN SELESAI',
+        items: [
+          { id: 'item_1', text: 'Cek tab Selesai di dashboard.', checked: false },
+          { id: 'item_2', text: 'Pastikan kurir sudah mengunggah bukti serah terima (foto & waktu).', checked: false },
+          { id: 'item_3', text: 'Kirim pesan ucapan terima kasih & permintaan review ke pembeli.', checked: false },
+        ]
+      },
+      {
+        id: 'section6',
+        title: '6. MONITOR REVIEW PEMBELI',
+        items: [
+          { id: 'item_1', text: 'Cek tab Review / Feedback di dashboard.', checked: false },
+          { id: 'item_2', text: 'Klasifikasikan review: positif / negatif / saran.', checked: false },
+          { id: 'item_3', text: 'Jika review negatif → buat tiket keluhan dan teruskan ke tim terkait (dapur / kurir).', checked: false },
+          { id: 'item_4', text: 'Balas review positif dengan ucapan terima kasih.', checked: false },
+        ]
+      },
+      {
+        id: 'section7',
+        title: '7. KOORDINASI & KESINKRONAN DASHBOARD',
+        items: [
+          { id: 'item_1', text: 'Pastikan semua dashboard (Admin – Dapur – Kurir) sinkron real time.', checked: false },
+          { id: 'item_2', text: 'Cek bahwa setiap perubahan status otomatis muncul di semua pihak.', checked: false },
+          { id: 'item_3', text: 'Laporkan ke IT jika dashboard lambat / tidak update.', checked: false },
+          { id: 'item_4', text: 'Lakukan refresh data setiap 30 menit selama jam operasional.', checked: false },
+        ]
+      },
+      {
+        id: 'section8',
+        title: '8. EVALUASI & LAPORAN AKHIR HARI',
+        items: [
+          { id: 'item_1', text: 'Catat keterlambatan atau kendala jika ada (dapur, kurir, pembayaran).', checked: false },
+          { id: 'item_2', text: 'Buat laporan singkat untuk pimpinan / manajer operasional.', checked: false },
+          { id: 'item_3', text: 'Update SOP bila ditemukan pola masalah yang berulang.', checked: false },
+        ]
+      },
+    ]
+  };
+}
+
+// Helper function to return default kurir checklist structure
+function getDefaultKurirChecklist() {
+  return {
+    sections: [
+      {
+        id: 'section1',
+        title: 'PERSIAPAN SEBELUM BERANGKAT',
+        items: [
+          { id: 'item_1', text: 'Terima informasi pengiriman dari Tim dapur & admin operasional', checked: false },
+          { id: 'item_2', text: 'Cek alamat tujuan, waktu kirim, dan kontak penerima', checked: false },
+          { id: 'item_3', text: 'Pastikan jenis kendaraan sesuai jumlah & jenis barang', checked: false },
+          { id: 'item_4', text: 'Cek kebersihan kendaraan (bebas debu, bau, dan sisa makanan)', checked: false },
+          { id: 'item_5', text: 'Isi bahan bakar secukupnya untuk seluruh rute', checked: false },
+          { id: 'item_6', text: 'Siapkan alat bantu: keranjang, troli, dus besar, plastik pelindung dll', checked: false },
+          { id: 'item_7', text: 'Pastikan HP aktif, baterai penuh, dan ada paket data', checked: false },
+          { id: 'item_8', text: 'Gunakan seragam, dan perlengkapan kerja lengkap', checked: false }
+        ]
+      },
+      {
+        id: 'section2',
+        title: 'PERLENGKAPAN KEAMANAN & ANTISIPASI CUACA',
+        items: [
+          { id: 'item_1', text: 'Siapkan jas hujan / mantel (khusus pengiriman outdoor/motor)', checked: false },
+          { id: 'item_2', text: 'Siapkan plastik besar / terpal untuk menutup barang dari hujan', checked: false },
+          { id: 'item_3', text: 'Siapkan tali pengikat / pengaman untuk barang besar', checked: false },
+          { id: 'item_4', text: 'Pastikan helm & jaket safety dalam kondisi baik', checked: false },
+          { id: 'item_5', text: 'Cek ban, rem, dan lampu kendaraan sebelum jalan', checked: false }
+        ]
+      },
+      {
+        id: 'section3',
+        title: 'PENGECEKAN BARANG SEBELUM MUAT',
+        items: [
+          { id: 'item_1', text: 'Cocokkan jumlah barang dengan nota dapur / packing list', checked: false },
+          { id: 'item_2', text: 'Pastikan kemasan utuh, tidak bocor, tidak penyok', checked: false },
+          { id: 'item_3', text: 'Pisahkan menu panas, dingin, dan perlengkapan hajatan', checked: false },
+          { id: 'item_4', text: 'Packing/Lindungi makanan atau barang mudah rusak dengan plastik tambahan', checked: false },
+          { id: 'item_5', text: 'Pastikan semua barang sudah difoto sebelum dimuat / upload resi jika dikirim dengan expedisi', checked: false }
+        ]
+      },
+      {
+        id: 'section4',
+        title: 'PROSES PEMUATAN',
+        items: [
+          { id: 'item_1', text: 'Muat barang sesuai urutan pengantaran (rute jauh di belakang, dekat di depan)', checked: false },
+          { id: 'item_2', text: 'Gunakan alas bersih di dalam kendaraan', checked: false },
+          { id: 'item_3', text: 'Pastikan posisi stabil (tidak miring / mudah terguncang)', checked: false },
+          { id: 'item_4', text: 'Gunakan tali pengikat bila perlu', checked: false },
+          { id: 'item_5', text: 'Lindungi kemasan dengan plastik / terpal bila cuaca tidak menentu', checked: false }
+        ]
+      },
+      {
+        id: 'section5',
+        title: 'SELAMA PERJALANAN',
+        items: [
+          { id: 'item_1', text: 'Berkendara hati-hati dan stabil (hindari rem mendadak)', checked: false },
+          { id: 'item_2', text: 'Hindari rute bergelombang bila memungkinkan', checked: false },
+          { id: 'item_3', text: 'Update posisi ke admin bila pengiriman jauh atau terhambat hujan', checked: false },
+          { id: 'item_4', text: 'Pastikan suhu & kondisi barang aman selama perjalanan', checked: false },
+          { id: 'item_5', text: 'Berhenti sejenak bila hujan deras untuk melindungi barang', checked: false }
+        ]
+      },
+      {
+        id: 'section6',
+        title: 'SESAMPAINYA DI LOKASI / PELANGGAN',
+        items: [
+          { id: 'item_1', text: 'Cek kembali nama & alamat penerima', checked: false },
+          { id: 'item_2', text: 'Serahkan barang dengan sopan dan ramah', checked: false },
+          { id: 'item_3', text: 'Pastikan pelanggan menerima pesanan dalam kondisi baik', checked: false },
+          { id: 'item_4', text: 'Tunjukkan nota / bukti pengiriman', checked: false },
+          { id: 'item_5', text: 'Foto bukti serah terima (barang + lokasi/penerima)', checked: false },
+          { id: 'item_6', text: 'Catat jika ada komplain, kekurangan, atau kerusakan', checked: false }
+        ]
+      },
+      {
+        id: 'section7',
+        title: 'SETELAH PENGIRIMAN',
+        items: [
+          { id: 'item_1', text: 'Laporkan jika ada kendala pengiriman di lapangan', checked: false },
+          { id: 'item_2', text: 'Bersihkan kendaraan dari sisa barang atau kotoran', checked: false },
+          { id: 'item_3', text: 'Isi bahan bakar bila perlu untuk kesiapan berikutnya', checked: false },
+          { id: 'item_4', text: 'Cek kondisi perlengkapan (jas hujan, plastik, tali, alat bantu)', checked: false }
+        ]
+      }
+    ]
+  };
+}
+
+// ========================================
+// OPERASIONAL CHECKLIST ENDPOINTS
+// ========================================
+app.get('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
+  try {
+    const shiftDate = req.params.date;
+    const userId = req.user.id;
+
+    const [checklists] = await pool.query(
+      'SELECT * FROM operasional_checklists WHERE shift_date = ? AND saved_by = ? ORDER BY created_at DESC LIMIT 1',
+      [shiftDate, userId]
+    );
+
+    if (checklists.length === 0) {
+      // Return default empty checklist if none exists
+      return res.json({ checklist_data: getDefaultOperasionalChecklist(), shift_date: shiftDate });
+    }
+
+    // Parse checklist_data if it's a string
+    let checklistData = checklists[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+
+    res.json({
+      ...checklists[0],
+      checklist_data: checklistData
+    });
+  } catch (error) {
+    console.error('Get operasional checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
+  try {
+    const { checklist_data } = req.body;
+    const shiftDate = req.params.date;
+    const userId = req.user.id;
+
+    // Insert or update checklist
+    const [result] = await pool.query(
+      'INSERT INTO operasional_checklists (shift_date, checklist_data, saved_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, updated_at = NOW()',
+      [shiftDate, JSON.stringify(checklist_data), userId, JSON.stringify(checklist_data)]
+    );
+
+    res.status(201).json({
+      message: 'Checklist berhasil disimpan',
+      checklist_id: result.insertId || result.affectedRows
+    });
+  } catch (error) {
+    console.error('Save operasional checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
 });
 
 // Helper function to return default checklist structure

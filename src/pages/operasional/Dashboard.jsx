@@ -13,6 +13,7 @@ const OperasionalDashboard = () => {
     processing: 0,
     shipping: 0,
     completed: 0,
+    reviews: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -78,7 +79,7 @@ const OperasionalDashboard = () => {
     <DashboardLayout role="operasional">
       <div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
           <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl shadow-lg p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
@@ -134,6 +135,20 @@ const OperasionalDashboard = () => {
               </div>
             </div>
           </div>
+
+          <div className="bg-gradient-to-br from-orange-500 to-orange-700 rounded-xl shadow-lg p-6 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-orange-100 text-sm">Review Masuk</p>
+                <p className="text-3xl font-bold mt-2">{stats.reviews || 0}</p>
+              </div>
+              <div className="w-12 h-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
@@ -173,16 +188,68 @@ const OperasionalDashboard = () => {
           </div>
         </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Link
+            to="/operasional/orders"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition cursor-pointer"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Kelola Pesanan</h3>
+                <p className="text-sm text-gray-600">Lihat semua pesanan</p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/operasional/status-flow"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition cursor-pointer"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Alur Status</h3>
+                <p className="text-sm text-gray-600">Pantau status real-time</p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/operasional/checklist"
+            className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition cursor-pointer"
+          >
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Checklist Harian</h3>
+                <p className="text-sm text-gray-600">Ceklis operasional harian</p>
+              </div>
+            </div>
+          </Link>
+        </div>
+
         <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4 md:mb-6">
-            <h2 className="text-lg md:text-xl font-bold text-gray-900">Daftar Pesanan</h2>
-            <select className="border border-gray-300 rounded-lg px-3 md:px-4 py-2 text-sm focus:ring-2 focus:ring-primary-500 w-full md:w-auto">
-              <option value="">Semua Status</option>
-              <option value="dibuat">Dibuat</option>
-              <option value="diproses">Diproses</option>
-              <option value="dikirim">Dikirim</option>
-              <option value="selesai">Selesai</option>
-            </select>
+            <h2 className="text-lg md:text-xl font-bold text-gray-900">Daftar Pesanan Terbaru</h2>
+            <Link
+              to="/operasional/orders"
+              className="text-primary-600 hover:text-primary-700 font-semibold text-sm"
+            >
+              Lihat Semua →
+            </Link>
           </div>
 
           {orders.length === 0 ? (
@@ -257,6 +324,56 @@ const OperasionalDashboard = () => {
               </table>
             </div>
           )}
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Pesanan Terbaru</h3>
+            <div className="space-y-3">
+              {orders.slice(0, 5).map((order) => (
+                <Link
+                  key={order.id}
+                  to={`/operasional/orders/${order.id}`}
+                  className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition"
+                >
+                  <div>
+                    <p className="font-semibold text-gray-900">#{order.id}</p>
+                    <p className="text-sm text-gray-600">{order.customer_name}</p>
+                  </div>
+                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getStatusColor(order.status)}`}>
+                    {order.status}
+                  </span>
+                </Link>
+              ))}
+              {orders.length === 0 && (
+                <p className="text-sm text-gray-600 text-center py-4">Tidak ada pesanan</p>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+            <div className="space-y-2">
+              <Link
+                to="/operasional/orders"
+                className="block px-4 py-3 bg-primary-50 text-primary-700 rounded-lg hover:bg-primary-100 transition font-semibold"
+              >
+                → Lihat Semua Pesanan
+              </Link>
+              <Link
+                to="/operasional/status-flow"
+                className="block px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition font-semibold"
+              >
+                → Pantau Alur Status
+              </Link>
+              <Link
+                to="/operasional/checklist"
+                className="block px-4 py-3 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition font-semibold"
+              >
+                → Checklist Harian
+              </Link>
+            </div>
+          </div>
         </div>
 
         <div className="mt-8 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">

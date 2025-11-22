@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { MapPin, Calendar, Clock, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, FileCheck, CheckCircle2, User } from 'lucide-react';
+import { MapPin, Calendar, Clock, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, CheckCircle2, User } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { orderAPI, voucherAPI, cashbackAPI } from '../../utils/api';
@@ -33,9 +33,13 @@ const Checkout = () => {
     landmark: '',
     sharelok_link: '',
     payment_method: 'transfer',
+    payment_amount: '',
     payment_proof: null,
+    partner_business_name: '',
+    partner_wa_number: '',
     notes: '',
     verification: false,
+    margin_amount: '', // For marketing users
   });
 
   useEffect(() => {
@@ -45,6 +49,7 @@ const Checkout = () => {
       return;
     }
     fetchCashbackBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchCashbackBalance = async () => {
@@ -110,8 +115,16 @@ const Checkout = () => {
   const calculateTotal = () => {
     const subtotal = getCartTotal();
     const discount = calculateDiscount();
-    const finalAmount = subtotal - discount - cashbackUsed;
+    const baseAmount = subtotal - discount - cashbackUsed;
+    const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
+    const finalAmount = baseAmount + marginAmount;
     return Math.max(0, finalAmount);
+  };
+
+  const getBaseAmount = () => {
+    const subtotal = getCartTotal();
+    const discount = calculateDiscount();
+    return subtotal - discount - cashbackUsed;
   };
 
   const handleCashbackChange = (e) => {
@@ -170,18 +183,26 @@ const Checkout = () => {
         wa_number_2: formData.wa_number_2,
         landmark: formData.landmark,
         sharelok_link: formData.sharelok_link,
+        payment_amount: formData.payment_amount || null,
+        partner_business_name: formData.partner_business_name || null,
+        partner_wa_number: formData.partner_wa_number || null,
         notes: formData.notes,
+        margin_amount: user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0,
       };
 
       // For logged-in users, use FormData if payment_proof exists, otherwise JSON
+      const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
+      
       if (formData.payment_proof) {
         const formDataToSend = new FormData();
         formDataToSend.append('items', JSON.stringify(items));
         formDataToSend.append('voucher_code', voucher?.code || '');
         formDataToSend.append('cashback_used', cashbackUsed.toString());
         formDataToSend.append('payment_method', formData.payment_method);
+        formDataToSend.append('payment_amount', formData.payment_amount || '');
         formDataToSend.append('delivery_address', formData.delivery_address || '-');
         formDataToSend.append('delivery_notes', JSON.stringify(deliveryNotesData));
+        formDataToSend.append('margin_amount', marginAmount.toString());
         formDataToSend.append('payment_proof', formData.payment_proof);
         
         // Use createWithProof if available, otherwise use uploadProof after create
@@ -192,8 +213,10 @@ const Checkout = () => {
           voucher_code: voucher?.code || null,
           cashback_used: cashbackUsed || 0,
           payment_method: formData.payment_method,
+          payment_amount: formData.payment_amount || null,
           delivery_address: formData.delivery_address || '-',
-          delivery_notes: JSON.stringify(deliveryNotesData)
+          delivery_notes: JSON.stringify(deliveryNotesData),
+          margin_amount: marginAmount
         };
         await orderAPI.create(orderData);
       }
@@ -271,6 +294,34 @@ const Checkout = () => {
                 className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 required
               />
+            )}
+            {formData.reference === 'marketing' && (
+              <div className="mt-4 space-y-4 border-t pt-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nama usaha mitra:
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.partner_business_name}
+                    onChange={(e) => handleInputChange('partner_business_name', e.target.value)}
+                    placeholder="Nama usaha mitra..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                    <Phone size={16} /> Nomer WA mitra:
+                  </label>
+                  <input
+                    type="tel"
+                    value={formData.partner_wa_number}
+                    onChange={(e) => handleInputChange('partner_wa_number', e.target.value)}
+                    placeholder="08xxxxxxxxxx"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+              </div>
             )}
           </div>
 
@@ -493,9 +544,36 @@ const Checkout = () => {
                 </div>
               )}
 
+              {/* Marketing Margin */}
+              {user?.role === 'marketing' && (
+                <div className="border-t pt-2">
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Margin Tambahan (akan ditambahkan ke total yang ditagih ke customer)
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.margin_amount || ''}
+                    onChange={(e) => handleInputChange('margin_amount', e.target.value)}
+                    min="0"
+                    step="1000"
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    placeholder="0"
+                  />
+                  {formData.margin_amount && parseFloat(formData.margin_amount) > 0 && (
+                    <div className="flex justify-between text-green-600 text-sm mt-1">
+                      <span>Margin Tambahan:</span>
+                      <span>+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Komisi Anda = Komisi dari Admin (otomatis) + Margin ini
+                  </p>
+                </div>
+              )}
+
               <div className="border-t pt-2 flex justify-between text-lg font-bold text-gray-900">
                 <span>Total:</span>
-                <span className="text-primary-600">Rp {formatRupiah(finalTotal)}</span>
+                <span className="text-primary-600">Rp {formatRupiah(calculateTotal())}</span>
               </div>
               <p className="text-xs text-gray-500">(Harga belum termasuk ongkir)</p>
             </div>
@@ -518,13 +596,30 @@ const Checkout = () => {
                   <span className="font-medium">TUNAI</span>
                   <p className="text-sm text-gray-600 mt-1 flex items-center gap-2"><Upload size={14} /> Upload bukti nota</p>
                   {formData.payment_method === 'tunai' && (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="mt-2 text-sm"
-                      required
-                    />
+                    <>
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nominal Pembayaran:
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.payment_amount}
+                          onChange={(e) => handleInputChange('payment_amount', e.target.value)}
+                          placeholder="Masukkan nominal pembayaran"
+                          min="0"
+                          step="1000"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          required
+                        />
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="mt-2 text-sm"
+                        required
+                      />
+                    </>
                   )}
                 </div>
               </label>
@@ -551,13 +646,30 @@ const Checkout = () => {
                   </p>
                   <p className="text-sm text-gray-600 mt-2 flex items-center gap-2"><Upload size={14} /> Upload bukti transfer</p>
                   {formData.payment_method === 'transfer' && (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="mt-2 text-sm"
-                      required
-                    />
+                    <>
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nominal Transfer:
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.payment_amount}
+                          onChange={(e) => handleInputChange('payment_amount', e.target.value)}
+                          placeholder="Masukkan nominal transfer"
+                          min="0"
+                          step="1000"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          required
+                        />
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="mt-2 text-sm"
+                        required
+                      />
+                    </>
                   )}
                 </div>
               </label>
@@ -598,13 +710,30 @@ const Checkout = () => {
                   </p>
                   <p className="text-sm text-gray-600 mt-2 flex items-center gap-2"><Upload size={14} /> Upload bukti pembayaran</p>
                   {formData.payment_method === 'dp' && (
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="mt-2 text-sm"
-                      required
-                    />
+                    <>
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Nominal DP:
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.payment_amount}
+                          onChange={(e) => handleInputChange('payment_amount', e.target.value)}
+                          placeholder="Masukkan nominal DP"
+                          min="0"
+                          step="1000"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          required
+                        />
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="mt-2 text-sm"
+                        required
+                      />
+                    </>
                   )}
                 </div>
               </label>

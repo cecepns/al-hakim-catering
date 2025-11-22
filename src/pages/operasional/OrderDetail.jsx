@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import ImageViewer from '../../components/ImageViewer';
 
 const OperasionalOrderDetail = () => {
   const { id } = useParams();
@@ -15,6 +16,8 @@ const OperasionalOrderDetail = () => {
   const [notes, setNotes] = useState('');
   const [proofFile, setProofFile] = useState(null);
   const [proofPreview, setProofPreview] = useState('');
+  const [viewingImage, setViewingImage] = useState(null);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -249,16 +252,20 @@ const OperasionalOrderDetail = () => {
                         </div>
                         <p className="text-sm text-gray-700 mt-1">Oleh: {log.handler_name || 'System'}</p>
                         {log.notes && <p className="text-sm text-gray-600 mt-1">{log.notes}</p>}
-                        {log.proof_url && (
+                        {(log.proof_image_url || log.proof_url) && (
                           <div className="mt-2">
-                            <a
-                              href={log.proof_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary-600 hover:text-primary-700 text-sm"
+                            <button
+                              onClick={() => {
+                                setViewingImage(log.proof_image_url || log.proof_url);
+                                setImageViewerOpen(true);
+                              }}
+                              className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1"
                             >
-                              Lihat Bukti →
-                            </a>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              Lihat Foto
+                            </button>
                           </div>
                         )}
                       </div>
@@ -375,6 +382,17 @@ const OperasionalOrderDetail = () => {
             </div>
           </div>
         )}
+
+        {/* Image Viewer Modal */}
+        <ImageViewer
+          imageUrl={viewingImage}
+          isOpen={imageViewerOpen}
+          onClose={() => {
+            setImageViewerOpen(false);
+            setViewingImage(null);
+          }}
+          title="Bukti Foto"
+        />
       </div>
     </DashboardLayout>
   );
