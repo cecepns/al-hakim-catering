@@ -76,8 +76,8 @@ const DashboardLayout = ({ children, role }) => {
         className={`
           md:w-64 md:shadow-lg
           ${
-            sidebarOpen ? 'w-64' : 'w-20 -left-96 md:-ml-64'
-          } bg-white shadow-lg fixed top-0 left-0 h-screen transition-all duration-300 z-20
+            sidebarOpen ? 'w-64 left-0' : 'w-20 -left-96 md:-ml-64'
+          } bg-white shadow-lg fixed top-0 h-screen transition-all duration-300 z-20
           md:h-screen md:flex-shrink-0
           ${
             sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
