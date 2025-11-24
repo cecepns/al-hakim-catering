@@ -382,7 +382,19 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'diproses') as tanggal_proses,
         (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'dikirim') as tanggal_pengiriman,
         (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'selesai') as tanggal_selesai,
-        (SELECT rating FROM reviews WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) as rating
+        (SELECT rating FROM reviews WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) as rating,
+        (SELECT u2.email 
+         FROM order_status_logs osl
+         JOIN users u2 ON osl.handler_id = u2.id
+         WHERE osl.order_id = o.id AND osl.status = 'diproses'
+         ORDER BY osl.created_at ASC
+         LIMIT 1) as handler_email_proses,
+        (SELECT u2.email 
+         FROM order_status_logs osl
+         JOIN users u2 ON osl.handler_id = u2.id
+         WHERE osl.order_id = o.id AND osl.status = 'dikirim'
+         ORDER BY osl.created_at ASC
+         LIMIT 1) as handler_email_pengiriman
       FROM orders o
       JOIN users u ON o.user_id = u.id
       LEFT JOIN order_items oi ON o.id = oi.order_id

@@ -126,9 +126,6 @@ const OperasionalOrders = () => {
                       Penilaian
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Detail Pesanan
-                    </th>
-                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Aksi
                     </th>
                   </tr>
@@ -162,18 +159,32 @@ const OperasionalOrders = () => {
                         }) : '-'}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {order.tanggal_proses ? new Date(order.tanggal_proses).toLocaleDateString('id-ID', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        }) : '-'}
+                        {order.tanggal_proses ? (
+                          <>
+                            <div>{new Date(order.tanggal_proses).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}</div>
+                            {order.handler_email_proses && (
+                              <div className="text-xs text-gray-500 mt-1">{order.handler_email_proses}</div>
+                            )}
+                          </>
+                        ) : '-'}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {order.tanggal_pengiriman ? new Date(order.tanggal_pengiriman).toLocaleDateString('id-ID', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        }) : '-'}
+                        {order.tanggal_pengiriman ? (
+                          <>
+                            <div>{new Date(order.tanggal_pengiriman).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}</div>
+                            {order.handler_email_pengiriman && (
+                              <div className="text-xs text-gray-500 mt-1">{order.handler_email_pengiriman}</div>
+                            )}
+                          </>
+                        ) : '-'}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {order.tanggal_selesai ? new Date(order.tanggal_selesai).toLocaleDateString('id-ID', {
@@ -191,14 +202,6 @@ const OperasionalOrders = () => {
                         ) : (
                           <span className="text-sm text-gray-400">-</span>
                         )}
-                      </td>
-                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {order.items_summary ? (
-                          <div className="max-w-xs truncate" title={order.items_summary}>
-                            {order.items_summary.substring(0, 50)}
-                            {order.items_summary.length > 50 ? '...' : ''}
-                          </div>
-                        ) : '-'}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm whitespace-nowrap">
                         <Link
