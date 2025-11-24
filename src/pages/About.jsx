@@ -278,7 +278,7 @@ const About = () => {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <a
-              href="https://wa.me/6281234567890"
+              href="https://wa.me/6283178436849"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block bg-primary-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-primary-700 transition"
@@ -286,7 +286,7 @@ const About = () => {
               Hubungi via WhatsApp
             </a>
             <a
-              href="tel:+6281234567890"
+              href="tel:+6283178436849"
               className="inline-block bg-white text-primary-600 border-2 border-primary-600 px-8 py-3 rounded-lg font-semibold hover:bg-primary-50 transition"
             >
               Telepon Kami
