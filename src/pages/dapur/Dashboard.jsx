@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
-import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const DapurDashboard = () => {
@@ -42,15 +40,6 @@ const DapurDashboard = () => {
     }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      'dibuat': 'bg-blue-100 text-blue-800',
-      'diproses': 'bg-yellow-100 text-yellow-800',
-      'dikirim': 'bg-purple-100 text-purple-800',
-      'selesai': 'bg-green-100 text-green-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
 
   if (loading) {
     return (
@@ -144,77 +133,6 @@ const DapurDashboard = () => {
               <p className="text-sm text-gray-600">Pesanan siap untuk dikirim</p>
             </div>
           </div>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-          <h2 className="text-lg md:text-xl font-bold text-gray-900 mb-4 md:mb-6">Daftar Pesanan</h2>
-
-          {orders.length === 0 ? (
-            <div className="text-center py-12">
-              <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              <p className="text-gray-600">Belum ada pesanan yang perlu diproses</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto -mx-4 md:mx-0 md:rounded-lg">
-              <table className="w-full min-w-max md:min-w-full">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      ID Pesanan
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Pelanggan
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Tanggal
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Total
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Status
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Aksi
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
-                        #{order.id}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                        {order.customer_name}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {new Date(order.created_at).toLocaleDateString('id-ID')}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                        Rp {formatRupiah(order.total_amount)}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm whitespace-nowrap">
-                        <Link
-                          to={`/dapur/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-700 font-semibold"
-                        >
-                          {order.status === 'dibuat' ? 'Proses' : 'Lihat'}
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
 
         <div className="mt-8 bg-orange-50 border-l-4 border-orange-500 p-6 rounded-lg">
