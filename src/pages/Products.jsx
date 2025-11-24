@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { productAPI } from '../utils/api';
@@ -13,12 +13,21 @@ const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState(searchParams.get('category') || 'all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [commissionPercentage, setCommissionPercentage] = useState(0);
+  const debounceTimer = useRef(null);
 
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const params = filter !== 'all' ? { category: filter } : {};
+      const params = {};
+      if (filter !== 'all') {
+        params.category = filter;
+      }
+      if (debouncedSearch.trim()) {
+        params.search = debouncedSearch.trim();
+      }
       const response = await productAPI.getAll(params);
       
       // Fetch images for each product and use first image if available
@@ -45,13 +54,29 @@ const Products = () => {
     }
   };
 
+  // Debounce search query
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 500);
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [searchQuery]);
+
   useEffect(() => {
     fetchProducts();
     if (user?.role === 'marketing' && user?.commission_percentage) {
       setCommissionPercentage(parseFloat(user.commission_percentage) || 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, user]);
+  }, [filter, debouncedSearch, user]);
 
   const handleBuyNow = (product) => {
     // Navigate directly to checkout with product data - no login required
@@ -78,6 +103,54 @@ const Products = () => {
           <p className="text-gray-600 mt-2">Pilih produk sesuai kebutuhan Anda</p>
         </div>
 
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg
+                className="h-5 w-5 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </div>
+            <input
+              type="text"
+              placeholder="Cari produk..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="block max-w-fit w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary-600 focus:border-primary-600 text-sm"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              >
+                <svg
+                  className="h-5 w-5 text-gray-400 hover:text-gray-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="flex space-x-2 mb-6 overflow-x-auto pb-2 no-scrollbar">
           {categories.map((cat) => (
             <button
@@ -100,7 +173,22 @@ const Products = () => {
           </div>
         ) : products.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl">
-            <p className="text-gray-600">Tidak ada produk tersedia</p>
+            <p className="text-gray-600">
+              {debouncedSearch.trim()
+                ? `Tidak ada produk ditemukan untuk "${debouncedSearch}"`
+                : 'Tidak ada produk tersedia'}
+            </p>
+            {debouncedSearch.trim() && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setDebouncedSearch('');
+                }}
+                className="mt-4 text-primary-600 hover:text-primary-700 text-sm font-medium"
+              >
+                Hapus pencarian
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
