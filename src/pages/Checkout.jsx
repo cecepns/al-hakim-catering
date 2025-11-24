@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { MapPin, Calendar, Clock, FileCheck, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, CheckCircle2, User } from 'lucide-react';
-import { orderAPI, productAPI } from '../utils/api';
+import { orderAPI, productAPI, voucherAPI } from '../utils/api';
 import { formatRupiah } from '../utils/formatHelper';
 import { useAuth } from '../context/AuthContext';
 
@@ -13,6 +13,9 @@ const Checkout = () => {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
+  const [voucherCode, setVoucherCode] = useState('');
+  const [voucher, setVoucher] = useState(null);
+  const [voucherError, setVoucherError] = useState('');
   const [formData, setFormData] = useState({
     reference: user?.role === 'marketing' ? 'marketing' : '',
     reference_detail: '',
@@ -71,12 +74,54 @@ const Checkout = () => {
     }
   };
 
+  const handleValidateVoucher = async () => {
+    if (!voucherCode.trim()) {
+      setVoucherError('Masukkan kode voucher');
+      return;
+    }
+
+    try {
+      setVoucherError('');
+      const response = await voucherAPI.validate(voucherCode);
+      const baseTotal = (product.discounted_price || product.price) * quantity;
+      
+      if (baseTotal < response.data.min_purchase) {
+        setVoucherError(`Minimal pembelian Rp ${formatRupiah(response.data.min_purchase)}`);
+        return;
+      }
+
+      setVoucher(response.data);
+      toast.success('Voucher berhasil digunakan');
+    } catch (error) {
+      setVoucher(null);
+      setVoucherError(error.response?.data?.message || 'Kode voucher tidak valid');
+    }
+  };
+
+  const calculateDiscount = () => {
+    if (!voucher || !product) return 0;
+    
+    const baseTotal = (product.discounted_price || product.price) * quantity;
+    if (baseTotal < voucher.min_purchase) return 0;
+
+    if (voucher.discount_type === 'percentage') {
+      const discount = baseTotal * (voucher.discount_value / 100);
+      return voucher.max_discount > 0 
+        ? Math.min(discount, voucher.max_discount)
+        : discount;
+    } else {
+      return voucher.discount_value;
+    }
+  };
+
   const calculateTotal = () => {
     if (!product) return 0;
     const price = product.discounted_price || product.price;
     const baseTotal = price * quantity;
+    const discount = calculateDiscount();
+    const baseAmount = baseTotal - discount;
     const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
-    return baseTotal + marginAmount;
+    return Math.max(0, baseAmount + marginAmount);
   };
 
   const handleSubmit = async (e) => {
@@ -114,6 +159,7 @@ const Checkout = () => {
         product_id: product.id,
         quantity: quantity,
       }]));
+      formDataToSend.append('voucher_code', voucher?.code || '');
       formDataToSend.append('delivery_address', formData.delivery_address || '-');
       formDataToSend.append('delivery_notes', JSON.stringify({
         reference: formData.reference,
@@ -410,6 +456,40 @@ const Checkout = () => {
                 <span>Harga Satuan:</span>
                 <span className="font-medium">Rp {formatRupiah(price)}</span>
               </div>
+              <div className="flex justify-between">
+                <span>Subtotal:</span>
+                <span className="font-medium">Rp {formatRupiah(price * quantity)}</span>
+              </div>
+
+              {/* Voucher */}
+              <div className="border-t pt-2">
+                <div className="flex space-x-2 mb-2">
+                  <input
+                    type="text"
+                    value={voucherCode}
+                    onChange={(e) => setVoucherCode(e.target.value)}
+                    placeholder="Kode voucher"
+                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleValidateVoucher}
+                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm"
+                  >
+                    Apply
+                  </button>
+                </div>
+                {voucherError && (
+                  <p className="text-red-600 text-xs mb-2">{voucherError}</p>
+                )}
+                {voucher && (
+                  <div className="flex justify-between text-green-600 text-sm">
+                    <span>Diskon Voucher:</span>
+                    <span>- Rp {formatRupiah(calculateDiscount())}</span>
+                  </div>
+                )}
+              </div>
+
               {/* Marketing Margin */}
               {user?.role === 'marketing' && (
                 <div className="border-t pt-2">

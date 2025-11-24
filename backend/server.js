@@ -503,8 +503,10 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     const items = JSON.parse(req.body.items);
     const delivery_address = req.body.delivery_address || '-';
-    const delivery_notes = req.body.delivery_notes || '';
+    let delivery_notes = req.body.delivery_notes || '';
     const payment_method = req.body.payment_method || 'transfer';
+    const voucher_code = req.body.voucher_code && req.body.voucher_code !== '' ? req.body.voucher_code : null;
+    const margin_amount = req.body.margin_amount ? parseFloat(req.body.margin_amount) : 0;
 
     // Parse delivery_notes JSON untuk extract data ke kolom terpisah
     let guestData = {};
@@ -564,7 +566,42 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       });
     }
 
-    const final_amount = total_amount;
+    // Handle voucher discount
+    let discount_amount = 0;
+    let voucher_id = null;
+
+    if (voucher_code) {
+      const [vouchers] = await connection.query(
+        'SELECT * FROM vouchers WHERE code = ? AND is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()',
+        [voucher_code]
+      );
+
+      if (vouchers.length > 0) {
+        const voucher = vouchers[0];
+
+        if (total_amount >= voucher.min_purchase && voucher.used_count < voucher.quota) {
+          if (voucher.discount_type === 'percentage') {
+            discount_amount = total_amount * (voucher.discount_value / 100);
+            if (voucher.max_discount > 0 && discount_amount > voucher.max_discount) {
+              discount_amount = voucher.max_discount;
+            }
+          } else {
+            discount_amount = voucher.discount_value;
+          }
+
+          voucher_id = voucher.id;
+
+          await connection.query(
+            'UPDATE vouchers SET used_count = used_count + 1 WHERE id = ?',
+            [voucher.id]
+          );
+        }
+      }
+    }
+
+    // Calculate base_amount (before margin) and final_amount (with margin)
+    const base_amount = total_amount - discount_amount;
+    const final_amount = base_amount + margin_amount;
 
     // Parse event_date dan event_time untuk kolom terpisah
     let eventDate = null;
@@ -583,15 +620,15 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     const [orderResult] = await connection.query(
       `INSERT INTO orders (
-        user_id, total_amount, discount_amount, cashback_used, final_amount, 
+        user_id, voucher_id, total_amount, discount_amount, cashback_used, final_amount, 
         payment_method, payment_amount, delivery_address, delivery_notes,
         guest_customer_name, guest_wa_number_1, guest_wa_number_2,
         guest_reference, guest_reference_detail, partner_business_name, partner_wa_number,
         guest_event_name, guest_event_date, guest_event_time,
         guest_sharelok_link, guest_landmark, guest_delivery_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        guestUserId, total_amount, 0, 0, final_amount, 
+        guestUserId, voucher_id, total_amount, discount_amount, 0, final_amount, 
         payment_method, payment_amount, delivery_address, delivery_notes,
         guestData.customer_name || null,
         guestData.wa_number_1 || null,
@@ -1477,9 +1514,30 @@ app.delete('/api/banners/:id', authenticateToken, authorizeRole('admin'), async 
 
 app.get('/api/vouchers', async (req, res) => {
   try {
-    const [vouchers] = await pool.query(
-      'SELECT * FROM vouchers WHERE is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()'
-    );
+    // Check if user is authenticated and is admin
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    let isAdmin = false;
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        isAdmin = decoded.role === 'admin';
+      } catch {
+        // Token invalid, treat as regular user
+      }
+    }
+
+    let query;
+    if (isAdmin) {
+      // Admin can see all vouchers (active and inactive)
+      query = 'SELECT * FROM vouchers ORDER BY created_at DESC';
+    } else {
+      // Regular users only see active and valid vouchers
+      query = 'SELECT * FROM vouchers WHERE is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()';
+    }
+
+    const [vouchers] = await pool.query(query);
     res.json(vouchers);
   } catch (error) {
     console.error('Get vouchers error:', error);
@@ -1529,6 +1587,60 @@ app.post('/api/vouchers', authenticateToken, authorizeRole('admin'), async (req,
     res.status(201).json({ message: 'Voucher berhasil dibuat', id: result.insertId });
   } catch (error) {
     console.error('Create voucher error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.put('/api/vouchers/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      code, name, discount_type, discount_value,
+      min_purchase, max_discount, quota,
+      valid_from, valid_until, is_active
+    } = req.body;
+
+    // Check if voucher exists
+    const [vouchers] = await pool.query('SELECT id FROM vouchers WHERE id = ?', [id]);
+    if (vouchers.length === 0) {
+      return res.status(404).json({ message: 'Voucher tidak ditemukan' });
+    }
+
+    await pool.query(
+      'UPDATE vouchers SET code = ?, name = ?, discount_type = ?, discount_value = ?, min_purchase = ?, max_discount = ?, quota = ?, valid_from = ?, valid_until = ?, is_active = ? WHERE id = ?',
+      [code, name, discount_type, discount_value, min_purchase || 0, max_discount || 0, quota, valid_from, valid_until, is_active !== false, id]
+    );
+
+    res.json({ message: 'Voucher berhasil diupdate' });
+  } catch (error) {
+    console.error('Update voucher error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.delete('/api/vouchers/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if voucher exists
+    const [vouchers] = await pool.query('SELECT id FROM vouchers WHERE id = ?', [id]);
+    if (vouchers.length === 0) {
+      return res.status(404).json({ message: 'Voucher tidak ditemukan' });
+    }
+
+    // Check if voucher is used in any orders
+    const [orders] = await pool.query('SELECT id FROM orders WHERE voucher_id = ? LIMIT 1', [id]);
+    if (orders.length > 0) {
+      // Instead of deleting, deactivate the voucher
+      await pool.query('UPDATE vouchers SET is_active = FALSE WHERE id = ?', [id]);
+      return res.json({ message: 'Voucher berhasil dinonaktifkan (tidak dapat dihapus karena sudah digunakan)' });
+    }
+
+    // Delete the voucher if not used
+    await pool.query('DELETE FROM vouchers WHERE id = ?', [id]);
+    res.json({ message: 'Voucher berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete voucher error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
