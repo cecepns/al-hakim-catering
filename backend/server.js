@@ -531,10 +531,20 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       delivery_notes = JSON.stringify(guestData);
     }
 
+    // Validate items array
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new Error('Items tidak valid atau kosong');
+    }
+
     let total_amount = 0;
     const orderItems = [];
 
     for (const item of items) {
+      // Validate item structure
+      if (!item.product_id || !item.quantity || item.quantity <= 0) {
+        throw new Error('Data item tidak valid');
+      }
+
       const [products] = await connection.query('SELECT * FROM products WHERE id = ?', [item.product_id]);
 
       if (products.length === 0) {
@@ -542,14 +552,23 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       }
 
       const product = products[0];
+
+      // Validate stock availability
+      if (product.stock < item.quantity) {
+        throw new Error(`Stok produk "${product.name}" tidak mencukupi. Stok tersedia: ${product.stock}`);
+      }
+
       let price = product.discounted_price || product.price;
+      let variant_name = null;
       
       // Add variant price adjustment if variant is selected
       if (item.variant_id) {
-        const [variants] = await connection.query('SELECT price_adjustment FROM product_variants WHERE id = ? AND product_id = ?', [item.variant_id, item.product_id]);
-        if (variants.length > 0) {
-          price += variants[0].price_adjustment;
+        const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
+        if (variants.length === 0) {
+          throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
+        price += variants[0].price_adjustment;
+        variant_name = variants[0].name; // Get variant name from database
       }
       
       const subtotal = price * item.quantity;
@@ -559,7 +578,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         product_id: item.product_id,
         variant_id: item.variant_id || null,
         product_name: product.name,
-        variant_name: item.variant_name || null,
+        variant_name: variant_name,
         quantity: item.quantity,
         price: price,
         subtotal: subtotal
@@ -749,10 +768,20 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       margin_amount = parseFloat(guestData.margin_amount) || 0;
     }
 
+    // Validate items array
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      throw new Error('Items tidak valid atau kosong');
+    }
+
     let total_amount = 0;
     const orderItems = [];
 
     for (const item of items) {
+      // Validate item structure
+      if (!item.product_id || !item.quantity || item.quantity <= 0) {
+        throw new Error('Data item tidak valid');
+      }
+
       const [products] = await connection.query('SELECT * FROM products WHERE id = ?', [item.product_id]);
 
       if (products.length === 0) {
@@ -760,14 +789,23 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
 
       const product = products[0];
+
+      // Validate stock availability
+      if (product.stock < item.quantity) {
+        throw new Error(`Stok produk "${product.name}" tidak mencukupi. Stok tersedia: ${product.stock}`);
+      }
+
       let price = product.discounted_price || product.price;
+      let variant_name = null;
       
       // Add variant price adjustment if variant is selected
       if (item.variant_id) {
-        const [variants] = await connection.query('SELECT price_adjustment FROM product_variants WHERE id = ? AND product_id = ?', [item.variant_id, item.product_id]);
-        if (variants.length > 0) {
-          price += variants[0].price_adjustment;
+        const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
+        if (variants.length === 0) {
+          throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
+        price += variants[0].price_adjustment;
+        variant_name = variants[0].name; // Get variant name from database
       }
       
       const subtotal = price * item.quantity;
@@ -777,7 +815,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         product_id: item.product_id,
         variant_id: item.variant_id || null,
         product_name: product.name,
-        variant_name: item.variant_name || null,
+        variant_name: variant_name,
         quantity: item.quantity,
         price: price,
         subtotal: subtotal
@@ -816,9 +854,32 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
     }
 
+    // Validate cashback balance if used
+    if (cashback_used > 0) {
+      const [users] = await connection.query('SELECT cashback_balance FROM users WHERE id = ?', [req.user.id]);
+      if (users.length === 0) {
+        throw new Error('User tidak ditemukan');
+      }
+      const userBalance = users[0].cashback_balance || 0;
+      if (cashback_used > userBalance) {
+        throw new Error(`Saldo cashback tidak mencukupi. Saldo tersedia: Rp ${userBalance.toLocaleString('id-ID')}`);
+      }
+    }
+
     // Calculate base_amount (before margin) and final_amount (with margin)
     const base_amount = total_amount - discount_amount - (cashback_used || 0);
+    
+    // Validate base_amount is not negative
+    if (base_amount < 0) {
+      throw new Error('Total pembayaran tidak valid. Diskon atau cashback melebihi total belanja.');
+    }
+    
     const final_amount = base_amount + margin_amount;
+    
+    // Validate final_amount is not negative
+    if (final_amount < 0) {
+      throw new Error('Total akhir tidak valid.');
+    }
 
     // Parse event_date dan event_time untuk kolom terpisah (if guestData exists)
     let eventDate = null;
