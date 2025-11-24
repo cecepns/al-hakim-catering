@@ -33,6 +33,7 @@ const KurirOrders = () => {
     const colors = {
       dibuat: 'bg-blue-100 text-blue-800',
       diproses: 'bg-yellow-100 text-yellow-800',
+      'siap-kirim': 'bg-orange-100 text-orange-800',
       dikirim: 'bg-purple-100 text-purple-800',
       selesai: 'bg-green-100 text-green-800',
     };
@@ -41,7 +42,7 @@ const KurirOrders = () => {
 
   const statuses = [
     { value: 'all', label: 'Semua' },
-    { value: 'diproses', label: 'Siap Kirim' },
+    { value: 'siap-kirim', label: 'Siap Kirim' },
     { value: 'dikirim', label: 'Dalam Pengiriman' },
     { value: 'selesai', label: 'Selesai' },
   ];
@@ -152,7 +153,7 @@ const KurirOrders = () => {
                           to={`/kurir/orders/${order.id}`}
                           className="text-primary-600 hover:text-primary-700 font-semibold"
                         >
-                          {order.status === 'diproses' ? 'Kirim' : 'Lihat'}
+                          {order.status === 'siap-kirim' ? 'Kirim' : 'Lihat'}
                         </Link>
                       </td>
                     </tr>

@@ -55,13 +55,13 @@ const KurirDashboard = () => {
     try {
       setLoading(true);
       const response = await orderAPI.getAll({ 
-        status: 'diproses,dikirim',
+        status: 'siap-kirim,dikirim',
         role: 'kurir' 
       });
       setOrders(response.data);
 
       const statusCount = response.data.reduce((acc, order) => {
-        if (order.status === 'diproses') acc.readyToShip++;
+        if (order.status === 'siap-kirim') acc.readyToShip++;
         if (order.status === 'dikirim') acc.inDelivery++;
         return acc;
       }, { readyToShip: 0, inDelivery: 0, delivered: 0 });
@@ -78,10 +78,27 @@ const KurirDashboard = () => {
     const colors = {
       'dibuat': 'bg-blue-100 text-blue-800',
       'diproses': 'bg-yellow-100 text-yellow-800',
+      'siap-kirim': 'bg-orange-100 text-orange-800',
       'dikirim': 'bg-purple-100 text-purple-800',
       'selesai': 'bg-green-100 text-green-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const calculateRemainingPayment = (order) => {
+    if (!order.payment_amount) return order.final_amount;
+    const remaining = order.final_amount - parseFloat(order.payment_amount);
+    return Math.max(0, remaining);
+  };
+
+  const getPaymentMethodLabel = (method) => {
+    const labels = {
+      'transfer': 'Transfer',
+      'dp': 'DP (Down Payment)',
+      'cod': 'COD (Bayar di Tempat)',
+      'tunai': 'Tunai',
+    };
+    return labels[method] || method;
   };
 
   if (loading) {
@@ -204,8 +221,17 @@ const KurirDashboard = () => {
                     <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden md:table-cell">
                       Alamat
                     </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden lg:table-cell">
+                      Link Sharelok
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden lg:table-cell">
+                      Metode Pembayaran
+                    </th>
+                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden lg:table-cell">
+                      Sisa Pembayaran
+                    </th>
                     <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Total
+                      Detail Pesanan
                     </th>
                     <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
@@ -219,6 +245,10 @@ const KurirDashboard = () => {
                   {orders.map((order) => {
                     const eventInfo = formatEventDateTime(order);
                     const hasWarning = checkEventWarning(order);
+                    const remainingPayment = calculateRemainingPayment(order);
+                    // Items might not be available in getAll response, so we'll show a placeholder
+                    const orderItemsCount = order.items?.length || 0;
+                    const totalItems = order.items?.reduce((sum, item) => sum + (item.quantity || 0), 0) || 0;
                     
                     return (
                       <tr key={order.id} className={`hover:bg-gray-50 ${hasWarning ? 'bg-yellow-50' : ''}`}>
@@ -247,8 +277,65 @@ const KurirDashboard = () => {
                         <td className="px-3 md:px-6 py-4 text-sm text-gray-600 hidden md:table-cell max-w-xs truncate">
                           {order.delivery_address}
                         </td>
-                        <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                          Rp {formatRupiah(order.total_amount)}
+                        <td className="px-3 md:px-6 py-4 text-sm hidden lg:table-cell">
+                          {order.guest_sharelok_link ? (
+                            <a
+                              href={order.guest_sharelok_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary-600 hover:text-primary-700 underline flex items-center gap-1"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                              Buka Lokasi
+                            </a>
+                          ) : (
+                            <span className="text-gray-400 text-xs">-</span>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm text-gray-700 hidden lg:table-cell whitespace-nowrap">
+                          <span className="font-medium">{getPaymentMethodLabel(order.payment_method)}</span>
+                          {order.payment_status && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {order.payment_status === 'paid' ? 'Lunas' : 
+                               order.payment_status === 'partial' ? 'Sebagian' : 
+                               'Belum Bayar'}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm hidden lg:table-cell whitespace-nowrap">
+                          {remainingPayment > 0 ? (
+                            <div>
+                              <div className="font-semibold text-orange-600">
+                                Rp {formatRupiah(remainingPayment)}
+                              </div>
+                              {order.payment_amount && (
+                                <div className="text-xs text-gray-500">
+                                  Terbayar: Rp {formatRupiah(order.payment_amount)}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-green-600 font-semibold text-xs">Lunas</div>
+                          )}
+                        </td>
+                        <td className="px-3 md:px-6 py-4 text-sm">
+                          <div className="text-gray-900">
+                            {orderItemsCount > 0 ? (
+                              <>
+                                <div className="font-medium">{orderItemsCount} item</div>
+                                <div className="text-xs text-gray-600 mt-1">
+                                  Total: {totalItems} pcs
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-xs text-gray-500 italic">Lihat detail</div>
+                            )}
+                            <div className="text-xs text-gray-700 mt-1 font-semibold">
+                              Rp {formatRupiah(order.final_amount)}
+                            </div>
+                          </div>
                         </td>
                         <td className="px-3 md:px-6 py-4 whitespace-nowrap">
                           <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
@@ -260,7 +347,7 @@ const KurirDashboard = () => {
                             to={`/kurir/orders/${order.id}`}
                             className="text-primary-600 hover:text-primary-700 font-semibold"
                           >
-                            {order.status === 'diproses' ? 'Kirim' : 'Lihat'}
+                            {order.status === 'siap-kirim' ? 'Kirim' : 'Lihat'}
                           </Link>
                         </td>
                       </tr>

@@ -135,7 +135,7 @@ const DapurOrderDetail = () => {
     try {
       setProcessing(true);
       const formData = new FormData();
-      formData.append('status', 'dikirim');
+      formData.append('status', 'siap-kirim');
       formData.append('notes', 'Pesanan selesai diproses dan siap dikirim');
 
       await orderAPI.updateStatus(id, formData);
@@ -153,6 +153,7 @@ const DapurOrderDetail = () => {
     const colors = {
       dibuat: 'bg-blue-100 text-blue-800',
       diproses: 'bg-yellow-100 text-yellow-800',
+      'siap-kirim': 'bg-orange-100 text-orange-800',
       dikirim: 'bg-purple-100 text-purple-800',
       selesai: 'bg-green-100 text-green-800',
     };

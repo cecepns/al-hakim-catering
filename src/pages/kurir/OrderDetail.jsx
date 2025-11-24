@@ -387,6 +387,7 @@ const KurirOrderDetail = () => {
     const colors = {
       dibuat: 'bg-blue-100 text-blue-800',
       diproses: 'bg-yellow-100 text-yellow-800',
+      'siap-kirim': 'bg-orange-100 text-orange-800',
       dikirim: 'bg-purple-100 text-purple-800',
       selesai: 'bg-green-100 text-green-800',
     };
@@ -591,7 +592,7 @@ const KurirOrderDetail = () => {
 
           {/* Action Panel */}
           <div className="space-y-6">
-            {order.status === 'diproses' && (
+            {order.status === 'siap-kirim' && (
               <div className="bg-white rounded-xl shadow-lg p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Mulai Pengiriman</h2>
                 
