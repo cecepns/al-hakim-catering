@@ -373,7 +373,9 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         COALESCE(o.guest_customer_name, u.name) as customer_name, 
         u.email as customer_email, 
         COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
-        GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories
+        GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories,
+        COUNT(DISTINCT oi.id) as items_count,
+        GROUP_CONCAT(DISTINCT CONCAT(oi.product_name, IF(oi.variant_name IS NOT NULL, CONCAT(' (', oi.variant_name, ')'), ''), ' x', oi.quantity) ORDER BY oi.id SEPARATOR ', ') as items_summary
       FROM orders o
       JOIN users u ON o.user_id = u.id
       LEFT JOIN order_items oi ON o.id = oi.order_id

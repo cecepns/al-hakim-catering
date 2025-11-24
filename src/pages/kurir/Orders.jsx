@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
@@ -9,11 +9,7 @@ const KurirOrders = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    fetchOrders();
-  }, [filter]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const params = { role: 'kurir' };
@@ -27,7 +23,11 @@ const KurirOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -38,6 +38,22 @@ const KurirOrders = () => {
       selesai: 'bg-green-100 text-green-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const calculateRemainingPayment = (order) => {
+    if (!order.payment_amount) return order.final_amount;
+    const remaining = order.final_amount - parseFloat(order.payment_amount);
+    return Math.max(0, remaining);
+  };
+
+  const getPaymentMethodLabel = (method) => {
+    const labels = {
+      'transfer': 'Transfer',
+      'dp': 'DP (Down Payment)',
+      'cod': 'COD (Bayar di Tempat)',
+      'tunai': 'Tunai',
+    };
+    return labels[method] || method || '-';
   };
 
   const statuses = [
@@ -111,7 +127,16 @@ const KurirOrders = () => {
                       Alamat
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Total
+                      Link Sharelok
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Metode Pembayaran
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Sisa Pembayaran
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Detail Pesanan
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Status
@@ -122,42 +147,73 @@ const KurirOrders = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{order.id}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {order.customer_name}
-                        </div>
-                        <div className="text-sm text-gray-600">{order.customer_phone}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
-                        {order.delivery_address}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        Rp {formatRupiah(order.total_amount)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
-                            order.status
-                          )}`}
-                        >
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Link
-                          to={`/kurir/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-700 font-semibold"
-                        >
-                          {order.status === 'siap-kirim' ? 'Kirim' : 'Lihat'}
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {orders.map((order) => {
+                    const remainingPayment = calculateRemainingPayment(order);
+                    return (
+                      <tr key={order.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          #{order.id}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {order.customer_name}
+                          </div>
+                          <div className="text-sm text-gray-600">{order.customer_phone}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">
+                          {order.delivery_address}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {order.guest_sharelok_link ? (
+                            <a
+                              href={order.guest_sharelok_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary-600 hover:text-primary-700 underline truncate block max-w-xs"
+                            >
+                              Buka Lokasi
+                            </a>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {getPaymentMethodLabel(order.payment_method)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {remainingPayment > 0 ? (
+                            <span className="text-orange-600 font-medium">
+                              Rp {formatRupiah(remainingPayment)}
+                            </span>
+                          ) : (
+                            <span className="text-green-600 font-medium">Lunas</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                          <div className="truncate" title={order.items_summary || `${order.items_count || 0} item`}>
+                            {order.items_summary || `${order.items_count || 0} item`}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span
+                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
+                              order.status
+                            )}`}
+                          >
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <Link
+                            to={`/kurir/orders/${order.id}`}
+                            className="text-primary-600 hover:text-primary-700 font-semibold"
+                          >
+                            {order.status === 'siap-kirim' ? 'Kirim' : 'Lihat'}
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
