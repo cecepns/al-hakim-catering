@@ -369,9 +369,15 @@ app.delete('/api/products/:id', authenticateToken, authorizeRole('admin'), async
 app.get('/api/orders', authenticateToken, async (req, res) => {
   try {
     let query = `
-      SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone
+      SELECT o.*, 
+        COALESCE(o.guest_customer_name, u.name) as customer_name, 
+        u.email as customer_email, 
+        COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+        GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories
       FROM orders o
       JOIN users u ON o.user_id = u.id
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN products p ON oi.product_id = p.id
       WHERE 1=1
     `;
     const params = [];
@@ -396,6 +402,9 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
       }
     }
 
+    // Group by order fields for aggregation
+    query += ' GROUP BY o.id';
+
     // Order by: pinned first, then by created_at DESC
     query += ' ORDER BY o.is_pinned DESC, o.created_at DESC';
 
@@ -415,7 +424,10 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
 app.get('/api/orders/:id', authenticateToken, async (req, res) => {
   try {
     const [orders] = await pool.query(
-      `SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone
+      `SELECT o.*, 
+        COALESCE(o.guest_customer_name, u.name) as customer_name, 
+        u.email as customer_email, 
+        COALESCE(o.guest_wa_number_1, u.phone) as customer_phone
        FROM orders o
        JOIN users u ON o.user_id = u.id
        WHERE o.id = ?`,

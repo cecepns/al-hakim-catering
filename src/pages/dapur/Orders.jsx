@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertCircle, Pin, PinOff } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const DapurOrders = () => {
@@ -57,14 +56,26 @@ const DapurOrders = () => {
 
   const hasUrgentOrders = orders.some((order) => isEventUrgent(order.guest_event_date));
 
-  const formatEventDateTime = (date, time) => {
+  const formatEventDate = (date) => {
     if (!date) return '-';
-    const dateStr = new Date(date).toLocaleDateString('id-ID', {
+    return new Date(date).toLocaleDateString('id-ID', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
     });
-    return time ? `${dateStr} ${time}` : dateStr;
+  };
+
+  const formatEventTime = (time) => {
+    if (!time) return '-';
+    return time;
+  };
+
+  const formatCategory = (categories) => {
+    if (!categories) return '-';
+    // Capitalize first letter of each category
+    return categories.split(', ').map(cat => {
+      return cat.charAt(0).toUpperCase() + cat.slice(1);
+    }).join(', ');
   };
 
   const handlePinOrder = async (orderId, currentPinnedStatus) => {
@@ -86,7 +97,8 @@ const DapurOrders = () => {
     { value: 'all', label: 'Semua' },
     { value: 'dibuat', label: 'Baru' },
     { value: 'diproses', label: 'Sedang Diproses' },
-    { value: 'dikirim', label: 'Selesai' },
+    { value: 'dikirim', label: 'Dikirim' },
+    { value: 'selesai', label: 'Selesai' },
   ];
 
   return (
@@ -147,10 +159,16 @@ const DapurOrders = () => {
                       Pelanggan
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tanggal/Waktu Acara
+                      Kategori
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Total
+                      Tanggal
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Jam
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Detail Pesanan
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Status
@@ -175,26 +193,39 @@ const DapurOrders = () => {
                     >
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         <div className="flex items-center gap-2">
-                          {order.is_pinned && (
+                          {!!order.is_pinned && (
                             <Pin size={16} className="text-yellow-600" fill="currentColor" />
                           )}
                           <span>#{order.id}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {order.customer_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {formatEventDateTime(order.guest_event_date, order.guest_event_time)}
-                        {isEventUrgent(order.guest_event_date) && (
-                          <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
-                            <AlertCircle size={14} />
-                            {getDaysUntilEvent(order.guest_event_date)} hari lagi
-                          </div>
-                        )}
+                        {order.customer_name || order.guest_customer_name || 'Guest'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        Rp {formatRupiah(order.total_amount)}
+                        {formatCategory(order.categories)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        <div>
+                          {formatEventDate(order.guest_event_date)}
+                          {isEventUrgent(order.guest_event_date) && (
+                            <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
+                              <AlertCircle size={14} />
+                              {getDaysUntilEvent(order.guest_event_date)} hari lagi
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatEventTime(order.guest_event_time)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <Link
+                          to={`/dapur/orders/${order.id}`}
+                          className="text-primary-600 hover:text-primary-700 font-semibold"
+                        >
+                          Lihat Detail
+                        </Link>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
@@ -206,12 +237,14 @@ const DapurOrders = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Link
-                          to={`/dapur/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-700 font-semibold"
-                        >
-                          {order.status === 'dibuat' ? 'Proses' : 'Lihat'}
-                        </Link>
+                        {order.status === 'dibuat' && (
+                          <Link
+                            to={`/dapur/orders/${order.id}`}
+                            className="text-primary-600 hover:text-primary-700 font-semibold"
+                          >
+                            Proses
+                          </Link>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <button
