@@ -373,9 +373,16 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         COALESCE(o.guest_customer_name, u.name) as customer_name, 
         u.email as customer_email, 
         COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+        o.guest_wa_number_1,
+        o.guest_wa_number_2,
+        o.guest_event_date,
         GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories,
         COUNT(DISTINCT oi.id) as items_count,
-        GROUP_CONCAT(DISTINCT CONCAT(oi.product_name, IF(oi.variant_name IS NOT NULL, CONCAT(' (', oi.variant_name, ')'), ''), ' x', oi.quantity) ORDER BY oi.id SEPARATOR ', ') as items_summary
+        GROUP_CONCAT(DISTINCT CONCAT(oi.product_name, IF(oi.variant_name IS NOT NULL, CONCAT(' (', oi.variant_name, ')'), ''), ' x', oi.quantity) ORDER BY oi.id SEPARATOR ', ') as items_summary,
+        (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'diproses') as tanggal_proses,
+        (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'dikirim') as tanggal_pengiriman,
+        (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'selesai') as tanggal_selesai,
+        (SELECT rating FROM reviews WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) as rating
       FROM orders o
       JOIN users u ON o.user_id = u.id
       LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -1684,6 +1691,34 @@ app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRol
     res.json({ message: 'Status penarikan berhasil diupdate' });
   } catch (error) {
     console.error('Update withdrawal status error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Update order payment status - Admin
+app.put('/api/admin/orders/:id/payment-status', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { payment_status } = req.body;
+
+    if (!['pending', 'partial', 'paid'].includes(payment_status)) {
+      return res.status(400).json({ message: 'Status pembayaran tidak valid' });
+    }
+
+    // Check if order exists
+    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    await pool.query(
+      'UPDATE orders SET payment_status = ? WHERE id = ?',
+      [payment_status, id]
+    );
+
+    res.json({ message: 'Status pembayaran berhasil diupdate' });
+  } catch (error) {
+    console.error('Update payment status error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });

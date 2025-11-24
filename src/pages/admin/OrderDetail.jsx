@@ -20,6 +20,9 @@ const AdminOrderDetail = () => {
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [paymentStatusModal, setPaymentStatusModal] = useState(false);
+  const [newPaymentStatus, setNewPaymentStatus] = useState('');
+  const [updatingPaymentStatus, setUpdatingPaymentStatus] = useState(false);
 
   useEffect(() => {
     fetchOrder();
@@ -66,6 +69,24 @@ const AdminOrderDetail = () => {
     }
   };
 
+  const handlePaymentStatusUpdate = async () => {
+    if (!newPaymentStatus) return;
+
+    try {
+      setUpdatingPaymentStatus(true);
+      await orderAPI.updatePaymentStatus(id, { payment_status: newPaymentStatus });
+      alert('Status pembayaran berhasil diupdate');
+      setPaymentStatusModal(false);
+      setNewPaymentStatus('');
+      fetchOrder();
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      alert(error.response?.data?.message || 'Gagal mengupdate status pembayaran');
+    } finally {
+      setUpdatingPaymentStatus(false);
+    }
+  };
+
   const handleProofChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -87,6 +108,24 @@ const AdminOrderDetail = () => {
       dibatalkan: 'bg-red-100 text-red-800',
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getPaymentStatusColor = (status) => {
+    const colors = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      partial: 'bg-orange-100 text-orange-800',
+      paid: 'bg-green-100 text-green-800',
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getPaymentStatusLabel = (status) => {
+    const labels = {
+      pending: 'Pending',
+      partial: 'Partial',
+      paid: 'Lunas',
+    };
+    return labels[status] || status;
   };
 
   if (loading) {
@@ -159,9 +198,22 @@ const AdminOrderDetail = () => {
                   <span className="text-gray-600">Metode Pembayaran:</span>
                   <span className="font-medium uppercase">{order.payment_method}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Status Pembayaran:</span>
-                  <span className="font-medium">{order.payment_status}</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-3 py-1 rounded-lg text-sm font-semibold ${getPaymentStatusColor(order.payment_status)}`}>
+                      {getPaymentStatusLabel(order.payment_status)}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setNewPaymentStatus(order.payment_status);
+                        setPaymentStatusModal(true);
+                      }}
+                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                    >
+                      Ubah
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -418,6 +470,50 @@ const AdminOrderDetail = () => {
           }}
           title="Bukti Foto"
         />
+
+        {/* Payment Status Update Modal */}
+        {paymentStatusModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Status Pembayaran</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status Pembayaran Baru
+                  </label>
+                  <select
+                    value={newPaymentStatus}
+                    onChange={(e) => setNewPaymentStatus(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Pilih Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="partial">Partial</option>
+                    <option value="paid">Lunas</option>
+                  </select>
+                </div>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => {
+                      setPaymentStatusModal(false);
+                      setNewPaymentStatus('');
+                    }}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handlePaymentStatusUpdate}
+                    disabled={!newPaymentStatus || updatingPaymentStatus}
+                    className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-400"
+                  >
+                    {updatingPaymentStatus ? 'Updating...' : 'Update'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Invoice Modal */}
         <InvoiceModal

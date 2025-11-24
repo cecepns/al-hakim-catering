@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const OperasionalOrders = () => {
@@ -9,11 +8,7 @@ const OperasionalOrders = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    fetchOrders();
-  }, [filter]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const params = filter !== 'all' ? { status: filter } : {};
@@ -24,7 +19,11 @@ const OperasionalOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -37,14 +36,6 @@ const OperasionalOrders = () => {
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const getPaymentStatusColor = (status) => {
-    const colors = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      partial: 'bg-orange-100 text-orange-800',
-      paid: 'bg-green-100 text-green-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
 
   const statuses = [
     { value: 'all', label: 'Semua' },
@@ -104,28 +95,40 @@ const OperasionalOrders = () => {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+              <table className="w-full min-w-max">
+                <thead className="bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       ID Pesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Pelanggan
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Pelanggan & Email
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tanggal
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      WA
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Total
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Pembayaran
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Tanggal Acara
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Tanggal Proses
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Tanggal Pengiriman
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Tanggal Selesai
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Penilaian
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Detail Pesanan
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Aksi
                     </th>
                   </tr>
@@ -133,49 +136,74 @@ const OperasionalOrders = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-3 md:px-4 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
                         #{order.id}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {order.customer_name || order.guest_customer_name || 'Guest'}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {order.customer_email || order.guest_wa_number_1 || '-'}
-                        </div>
+                      <td className="px-3 md:px-4 py-4 text-sm whitespace-nowrap">
+                        <div className="font-medium text-gray-900">{order.customer_name}</div>
+                        <div className="text-xs text-gray-500">{order.customer_email || '-'}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {new Date(order.created_at).toLocaleDateString('id-ID', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.guest_wa_number_1 || order.customer_phone || '-'}
+                        {order.guest_wa_number_2 && (
+                          <div className="text-xs text-gray-500">{order.guest_wa_number_2}</div>
+                        )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        Rp {formatRupiah(order.final_amount)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(
-                            order.payment_status
-                          )}`}
-                        >
-                          {order.payment_method} - {order.payment_status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
-                            order.status
-                          )}`}
-                        >
+                      <td className="px-3 md:px-4 py-4 whitespace-nowrap">
+                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.guest_event_date ? new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        }) : '-'}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.tanggal_proses ? new Date(order.tanggal_proses).toLocaleDateString('id-ID', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        }) : '-'}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.tanggal_pengiriman ? new Date(order.tanggal_pengiriman).toLocaleDateString('id-ID', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        }) : '-'}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.tanggal_selesai ? new Date(order.tanggal_selesai).toLocaleDateString('id-ID', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        }) : '-'}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 whitespace-nowrap">
+                        {order.rating ? (
+                          <div className="flex items-center">
+                            <span className="text-yellow-400 mr-1">★</span>
+                            <span className="text-sm text-gray-900">{order.rating}</span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {order.items_summary ? (
+                          <div className="max-w-xs truncate" title={order.items_summary}>
+                            {order.items_summary.substring(0, 50)}
+                            {order.items_summary.length > 50 ? '...' : ''}
+                          </div>
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 text-sm whitespace-nowrap">
                         <Link
                           to={`/operasional/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-900"
+                          className="text-primary-600 hover:text-primary-700 font-semibold"
                         >
                           Detail
                         </Link>

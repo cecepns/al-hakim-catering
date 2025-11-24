@@ -70,6 +70,7 @@ export const orderAPI = {
   updateStatus: (id, data) => api.put(`/orders/${id}/status`, data, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  updatePaymentStatus: (id, data) => api.put(`/admin/orders/${id}/payment-status`, data),
   getInvoice: (id) => api.get(`/orders/${id}/invoice`),
   pinOrder: (id, is_pinned) => api.put(`/orders/${id}/pin`, { is_pinned }),
   getReview: (id) => api.get(`/orders/${id}/review`),
