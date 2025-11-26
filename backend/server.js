@@ -1958,10 +1958,11 @@ app.get('/api/stats/dashboard', authenticateToken, authorizeRole('admin'), async
 app.get('/api/cart', authenticateToken, async (req, res) => {
   try {
     const [cart] = await pool.query(
-      `SELECT c.*, p.name, p.price, p.discounted_price, p.image_url, pv.name as variant_name
+      `SELECT c.*, p.name, p.price, p.discounted_price, p.image_url, pv.name as variant_name, pvi.image_url as variant_image_url
        FROM cart c
        JOIN products p ON c.product_id = p.id
        LEFT JOIN product_variants pv ON c.variant_id = pv.id
+       LEFT JOIN product_variant_images pvi ON c.variant_id = pvi.variant_id
        WHERE c.user_id = ?`,
       [req.user.id]
     );

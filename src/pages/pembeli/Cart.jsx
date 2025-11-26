@@ -12,6 +12,7 @@ const Cart = () => {
 
   useEffect(() => {
     fetchCart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleQuantityChange = async (itemId, newQuantity) => {
@@ -19,7 +20,7 @@ const Cart = () => {
     try {
       await updateCart(itemId, { quantity: newQuantity });
       toast.success('Jumlah produk berhasil diupdate');
-    } catch (error) {
+    } catch {
       toast.error('Gagal update keranjang');
     }
   };
@@ -29,7 +30,7 @@ const Cart = () => {
       try {
         await removeFromCart(itemId);
         toast.success('Item berhasil dihapus dari keranjang');
-      } catch (error) {
+      } catch {
         toast.error('Gagal menghapus item');
       }
     }
@@ -66,7 +67,7 @@ const Cart = () => {
               {cart.map((item) => (
                 <div key={item.id} className="bg-white rounded-xl shadow-lg p-6">
                   <div className="flex items-center space-x-4">
-                    <img src={getImageUrl(item.image_url)} alt={item.name} className="w-24 h-24 object-cover rounded-lg" />
+                    <img src={getImageUrl(item.variant_image_url || item.image_url)} alt={item.name} className="w-24 h-24 object-cover rounded-lg" />
                     <div className="flex-1">
                       <h3 className="font-semibold text-gray-900">{item.name}</h3>
                       {item.variant_name && (
