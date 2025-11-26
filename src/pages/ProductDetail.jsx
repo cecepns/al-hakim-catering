@@ -63,9 +63,8 @@ const ProductDetail = () => {
       return;
     }
 
-    const allowedRoles = ["pembeli", "admin", "marketing"];
-    if (!allowedRoles.includes(user.role)) {
-      toast.error("Anda tidak memiliki akses untuk melakukan pembelian");
+    if (user.role !== "pembeli") {
+      toast.error("Fitur keranjang hanya tersedia untuk pembeli. Gunakan 'Beli Sekarang' untuk membeli.");
       return;
     }
 
@@ -112,9 +111,17 @@ const ProductDetail = () => {
         variant_id: selectedVariation?.id || null,
         quantity,
       });
-      toast.success("Produk berhasil ditambahkan ke keranjang!");
+      toast.success("Produk berhasil ditambahkan!");
+      
+      // Redirect based on role
       setTimeout(() => {
-        navigate("/pembeli/checkout");
+        if (user.role === "pembeli") {
+          // Pembeli: redirect to cart page
+          navigate("/pembeli/cart");
+        } else {
+          // Admin & Marketing: redirect directly to checkout
+          navigate("/pembeli/checkout");
+        }
       }, 1000);
     } catch (err) {
       console.error("Error adding to cart:", err);
