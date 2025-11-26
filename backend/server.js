@@ -264,12 +264,12 @@ app.get('/api/products/:id', async (req, res) => {
 
 app.post('/api/products', authenticateToken, authorizeRole('admin'), upload.single('image'), async (req, res) => {
   try {
-    const { name, description, category, price, discount_percentage, is_promo, stock, commission_percentage } = req.body;
+    const { name, description, category, price, discount_percentage, is_promo, stock, commission_percentage, cashback_percentage } = req.body;
     const image_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     const [result] = await pool.query(
-      'INSERT INTO products (name, description, category, price, discount_percentage, is_promo, stock, image_url, commission_percentage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url, commission_percentage || 0]
+      'INSERT INTO products (name, description, category, price, discount_percentage, cashback_percentage, is_promo, stock, image_url, commission_percentage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description, category, price, discount_percentage || 0, cashback_percentage || 1, is_promo || false, stock || 0, image_url, commission_percentage || 0]
     );
 
     res.status(201).json({ message: 'Produk berhasil ditambahkan', id: result.insertId });
@@ -305,7 +305,7 @@ const deleteImageFiles = (imageUrls) => {
 
 app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.single('image'), async (req, res) => {
   try {
-    const { name, description, category, price, discount_percentage, is_promo, stock, commission_percentage } = req.body;
+    const { name, description, category, price, discount_percentage, cashback_percentage, is_promo, stock, commission_percentage } = req.body;
     let image_url = req.body.existing_image;
 
     // If new image is uploaded, delete the old one
@@ -327,8 +327,8 @@ app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.s
     }
 
     await pool.query(
-      'UPDATE products SET name = ?, description = ?, category = ?, price = ?, discount_percentage = ?, is_promo = ?, stock = ?, image_url = ?, commission_percentage = ? WHERE id = ?',
-      [name, description, category, price, discount_percentage || 0, is_promo || false, stock || 0, image_url, commission_percentage || 0, req.params.id]
+      'UPDATE products SET name = ?, description = ?, category = ?, price = ?, discount_percentage = ?, cashback_percentage = ?, is_promo = ?, stock = ?, image_url = ?, commission_percentage = ? WHERE id = ?',
+      [name, description, category, price, discount_percentage || 0, cashback_percentage || 1, is_promo || false, stock || 0, image_url, commission_percentage || 0, req.params.id]
     );
 
     res.json({ message: 'Produk berhasil diupdate' });
@@ -775,6 +775,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
     }
 
     let total_amount = 0;
+    let cashback_earned = 0;
     const orderItems = [];
 
     for (const item of items) {
@@ -790,6 +791,9 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
 
       const product = products[0];
+      const productCashbackPercentage = product.cashback_percentage !== undefined && product.cashback_percentage !== null
+        ? parseFloat(product.cashback_percentage)
+        : 1;
 
       // Validate stock availability
       if (product.stock < item.quantity) {
@@ -811,6 +815,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       
       const subtotal = price * item.quantity;
       total_amount += subtotal;
+      cashback_earned += subtotal * (productCashbackPercentage / 100);
 
       orderItems.push({
         product_id: item.product_id,
@@ -959,8 +964,6 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         [req.user.id, orderId, cashback_used, 'used', 'Digunakan untuk pesanan #' + orderId]
       );
     }
-
-    const cashback_earned = final_amount * 0.01;
     await connection.query(
       'UPDATE users SET cashback_balance = cashback_balance + ? WHERE id = ?',
       [cashback_earned, req.user.id]

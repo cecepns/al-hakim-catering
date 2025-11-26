@@ -136,6 +136,9 @@ const AdminProducts = () => {
                       Harga
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Cashback
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Stok
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
@@ -187,6 +190,11 @@ const AdminProducts = () => {
                             Rp {formatRupiah(product.price)}
                           </span>
                         )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {product.cashback_percentage != null
+                          ? `${product.cashback_percentage}%`
+                          : '1%'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {product.stock}
