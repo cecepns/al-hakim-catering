@@ -1931,17 +1931,39 @@ app.put('/api/admin/orders/:id/notes', authenticateToken, authorizeRole('admin')
           ? JSON.parse(currentNotes) 
           : { notes: currentNotes };
         
-        // Update or add kitchen_notes field
+        // Preserve customer notes (original 'notes' field) if it exists and is different from admin/kitchen notes
+        // Only update admin_notes and kitchen_notes, keep customer notes intact
+        const customerNotes = parsedNotes.notes && 
+          parsedNotes.notes !== parsedNotes.kitchen_notes && 
+          parsedNotes.notes !== parsedNotes.admin_notes
+          ? parsedNotes.notes 
+          : (parsedNotes.notes || '');
+        
+        // Update or add kitchen_notes and admin_notes fields
         parsedNotes.kitchen_notes = notes || '';
         parsedNotes.admin_notes = notes || '';
         
+        // Preserve customer notes if they exist separately
+        if (customerNotes && customerNotes !== notes) {
+          parsedNotes.notes = customerNotes;
+        } else if (!parsedNotes.notes) {
+          // If no customer notes exist, set notes to empty or the admin notes
+          parsedNotes.notes = '';
+        }
+        
         updatedNotes = JSON.stringify(parsedNotes);
       } catch {
-        // If not JSON, just use the notes as plain text or create JSON structure
-        updatedNotes = JSON.stringify({ notes: notes || '', kitchen_notes: notes || '', admin_notes: notes || '' });
+        // If not JSON, preserve the original as customer notes and create JSON structure
+        const customerNotes = currentNotes || '';
+        updatedNotes = JSON.stringify({ 
+          notes: customerNotes, 
+          kitchen_notes: notes || '', 
+          admin_notes: notes || '' 
+        });
       }
     } else {
-      updatedNotes = JSON.stringify({ notes: notes || '', kitchen_notes: notes || '', admin_notes: notes || '' });
+      // No existing notes, create new structure
+      updatedNotes = JSON.stringify({ notes: '', kitchen_notes: notes || '', admin_notes: notes || '' });
     }
 
     await pool.query(

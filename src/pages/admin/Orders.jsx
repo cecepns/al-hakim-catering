@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
+import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import InvoiceModal from '../../components/InvoiceModal';
 
@@ -17,6 +17,7 @@ const AdminOrders = () => {
 
   useEffect(() => {
     fetchOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const fetchOrders = async () => {
@@ -261,7 +262,7 @@ const AdminOrders = () => {
                             <textarea
                               value={notesValue}
                               onChange={(e) => setNotesValue(e.target.value)}
-                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded resize-none"
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
                               rows="3"
                               placeholder="Catatan untuk proses dapur..."
                             />
@@ -269,31 +270,31 @@ const AdminOrders = () => {
                               <button
                                 onClick={() => handleSaveNotes(order.id)}
                                 disabled={savingNotes}
-                                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 transition"
                               >
                                 {savingNotes ? 'Menyimpan...' : 'Simpan'}
                               </button>
                               <button
                                 onClick={handleCancelEdit}
                                 disabled={savingNotes}
-                                className="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50"
+                                className="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 transition"
                               >
                                 Batal
                               </button>
                             </div>
                           </div>
                         ) : (
-                          <div className="group relative">
-                            <div className="truncate max-w-[200px]" title={getNotesDisplay(order)}>
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 truncate max-w-[180px]" title={getNotesDisplay(order)}>
                               {getNotesDisplay(order) || '-'}
                             </div>
                             <button
                               onClick={() => handleEditNotes(order)}
-                              className="ml-2 text-primary-600 hover:text-primary-800 text-xs opacity-0 group-hover:opacity-100 transition"
+                              className="flex-shrink-0 text-primary-600 hover:text-primary-800 text-xs transition p-1 hover:bg-primary-50 rounded"
                               title="Edit catatan"
                             >
                               <svg
-                                className="w-4 h-4 inline"
+                                className="w-4 h-4"
                                 fill="none"
                                 stroke="currentColor"
                                 viewBox="0 0 24 24"
