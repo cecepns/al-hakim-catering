@@ -914,7 +914,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         guest_reference, guest_reference_detail, partner_business_name, partner_wa_number,
         guest_event_name, guest_event_date, guest_event_time,
         guest_sharelok_link, guest_landmark, guest_delivery_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         req.user.id, marketing_id, voucher_id, total_amount, base_amount, discount_amount, cashback_used || 0, final_amount, margin_amount,
         payment_method, payment_amount, delivery_address, deliveryNotesJson,
@@ -2886,18 +2886,26 @@ app.put('/api/company-settings', authenticateToken, authorizeRole('admin'), uplo
 // ========================================
 
 // Get invoice data for an order
-app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin'), async (req, res) => {
+app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'marketing'), async (req, res) => {
   try {
     const orderId = req.params.id;
 
-    // Get order with customer info
-    const [orders] = await pool.query(
-      `SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone, u.address as customer_address
-       FROM orders o
-       JOIN users u ON o.user_id = u.id
-       WHERE o.id = ?`,
-      [orderId]
-    );
+    // Build query with role-based access control
+    let query = `
+      SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone, u.address as customer_address
+      FROM orders o
+      JOIN users u ON o.user_id = u.id
+      WHERE o.id = ?
+    `;
+    const params = [orderId];
+
+    // If user is marketing, only allow access to their own orders
+    if (req.user.role === 'marketing') {
+      query += ' AND o.marketing_id = ?';
+      params.push(req.user.id);
+    }
+
+    const [orders] = await pool.query(query, params);
 
     if (orders.length === 0) {
       return res.status(404).json({ message: 'Pesanan tidak ditemukan' });

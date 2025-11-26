@@ -1,19 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { commissionAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import InvoiceModal from '../../components/InvoiceModal';
 
 const MarketingOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [filter]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const params = filter !== 'all' ? { status: filter } : {};
@@ -24,7 +23,11 @@ const MarketingOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -170,13 +173,27 @@ const MarketingOrders = () => {
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <Link
-                          to={`/marketing/orders/${order.id}`}
-                          className="text-primary-600 hover:text-primary-700 font-semibold"
-                        >
-                          Detail
-                        </Link>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            to={`/marketing/orders/${order.id}`}
+                            className="text-primary-600 hover:text-primary-900 text-xs"
+                          >
+                            Detail
+                          </Link>
+                          {order.status !== 'cancelled' && (
+                            <button
+                              onClick={() => {
+                                setSelectedOrderId(order.id);
+                                setInvoiceModalOpen(true);
+                              }}
+                              className="text-green-600 hover:text-green-900 text-xs"
+                              title="Lihat Faktur/Nota"
+                            >
+                              Faktur
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -185,6 +202,15 @@ const MarketingOrders = () => {
             </div>
           )}
         </div>
+
+        <InvoiceModal
+          isOpen={invoiceModalOpen}
+          onClose={() => {
+            setInvoiceModalOpen(false);
+            setSelectedOrderId(null);
+          }}
+          orderId={selectedOrderId}
+        />
       </div>
     </DashboardLayout>
   );
