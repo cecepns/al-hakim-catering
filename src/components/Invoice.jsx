@@ -1,4 +1,5 @@
 import { formatRupiah, parseDeliveryNotes } from '../utils/formatHelper';
+import headerInvoice from '../assets/header-invoice.jpeg';
 
 const Invoice = ({ order, items, company }) => {
   return (
@@ -8,18 +9,22 @@ const Invoice = ({ order, items, company }) => {
       style={{ fontFamily: 'Arial, sans-serif' }}
     >
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-8 border-b-2 border-gray-300 pb-6">
+      <div className="flex flex-row justify-between md:items-start gap-4 mb-8 border-b-2 border-gray-300 pb-6">
         <div className="md:flex-1">
-          {company.company_logo_url && (
-            <img 
-              src={`https://api-inventory.isavralabel.com/al-hakim${company.company_logo_url}`}
+          {(company.company_logo_url || headerInvoice) && (
+            <img
+              src={
+                company.company_logo_url
+                  ? `https://api-inventory.isavralabel.com/al-hakim${company.company_logo_url}`
+                  : headerInvoice
+              }
               alt="Logo"
-              className="h-20 mb-4"
+              className="h-20 mb-4 object-contain"
             />
           )}
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+          {/* <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             {company.company_name || 'Al Hakim Catering'}
-          </h1>
+          </h1> */}
           {company.company_address && (
             <p className="text-gray-600 mt-2">{company.company_address}</p>
           )}
