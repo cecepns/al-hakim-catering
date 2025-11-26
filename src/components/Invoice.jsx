@@ -1,4 +1,4 @@
-import { formatRupiah } from '../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes } from '../utils/formatHelper';
 
 const Invoice = ({ order, items, company }) => {
   return (
@@ -34,7 +34,7 @@ const Invoice = ({ order, items, company }) => {
         </div>
       </div>
 
-      {/* Customer Info */}
+      {/* Customer & Payment Info */}
       <div className="mb-8 grid grid-cols-2 gap-8">
         <div>
           <h3 className="font-semibold text-gray-900 mb-2">Kepada:</h3>
@@ -46,18 +46,65 @@ const Invoice = ({ order, items, company }) => {
             <p className="text-gray-600 text-sm">Email: {order.customer_email}</p>
           )}
           {order.customer_address && (
-            <p className="text-gray-600 text-sm mt-2">{order.customer_address}</p>
+            <p className="text-gray-600 text-sm mt-2 whitespace-pre-line">
+              {order.customer_address}
+            </p>
           )}
+
+          {/* Detail acara & pengiriman dari delivery_notes */}
+          {order.delivery_notes && (() => {
+            const notes = parseDeliveryNotes(order.delivery_notes, true);
+            if (!notes) return null;
+
+            return (
+              <div className="mt-3 text-xs text-gray-700 bg-gray-50 rounded-lg p-3 space-y-1">
+                <p className="font-semibold text-gray-800">
+                  Detail Acara & Pengiriman:
+                </p>
+                {Array.isArray(notes) ? (
+                  notes.map((line, idx) => (
+                    <p key={idx}>{line}</p>
+                  ))
+                ) : (
+                  <p>{notes}</p>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div>
           <h3 className="font-semibold text-gray-900 mb-2">Informasi Pembayaran:</h3>
-          <p className="text-gray-700">Metode: <span className="uppercase">{order.payment_method}</span></p>
-          <p className="text-gray-700">Status: <span className="capitalize">{order.payment_status}</span></p>
+          <p className="text-gray-700">
+            Metode:{' '}
+            <span className="uppercase">{order.payment_method}</span>
+          </p>
+          <p className="text-gray-700">
+            Status:{' '}
+            <span className="capitalize">{order.payment_status}</span>
+          </p>
+          {order.payment_amount != null && (
+            <p className="text-gray-700">
+              Dibayar:{' '}
+              <span className="font-medium">
+                Rp {formatRupiah(order.payment_amount)}
+              </span>
+            </p>
+          )}
+          {order.margin_amount != null && order.margin_amount > 0 && (
+            <p className="text-gray-700">
+              Margin Marketing:{' '}
+              <span className="font-medium">
+                Rp {formatRupiah(order.margin_amount)}
+              </span>
+            </p>
+          )}
           {company.bank_name && company.bank_account_number && (
-            <div className="mt-2 text-sm text-gray-600">
+            <div className="mt-3 text-sm text-gray-600">
               <p>Bank: {company.bank_name}</p>
               <p>No. Rek: {company.bank_account_number}</p>
-              {company.bank_account_name && <p>a.n. {company.bank_account_name}</p>}
+              {company.bank_account_name && (
+                <p>a.n. {company.bank_account_name}</p>
+              )}
             </div>
           )}
         </div>

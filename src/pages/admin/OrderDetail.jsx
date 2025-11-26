@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes, formatDate } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 import InvoiceModal from '../../components/InvoiceModal';
@@ -208,7 +208,7 @@ const AdminOrderDetail = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Detail Pesanan #{order.id}</h1>
             <p className="text-gray-600 mt-1">
-              {new Date(order.created_at).toLocaleString('id-ID')}
+              {formatDate(order.created_at)}
             </p>
           </div>
           <button
@@ -234,57 +234,144 @@ const AdminOrderDetail = () => {
                 </span>
               </div>
 
-              <div className="space-y-4">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Pelanggan:</span>
-                  <span className="font-medium">{order.customer_name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Email:</span>
-                  <span className="font-medium">{order.customer_email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Telepon:</span>
-                  <span className="font-medium">{order.customer_phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Metode Pembayaran:</span>
-                  <span className="font-medium uppercase">{order.payment_method}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Status Pembayaran:</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-3 py-1 rounded-lg text-sm font-semibold ${getPaymentStatusColor(order.payment_status)}`}>
-                      {getPaymentStatusLabel(order.payment_status)}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Pelanggan:</span>
+                    <span className="font-medium text-right max-w-[60%] truncate">
+                      {order.customer_name}
                     </span>
-                    <button
-                      onClick={() => {
-                        setNewPaymentStatus(order.payment_status);
-                        setPaymentStatusModal(true);
-                      }}
-                      className="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                    >
-                      Ubah
-                    </button>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Email:</span>
+                    <span className="font-medium text-right max-w-[60%] truncate">
+                      {order.customer_email}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Telepon:</span>
+                    <span className="font-medium text-right max-w-[60%] truncate">
+                      {order.customer_phone}
+                    </span>
+                  </div>
+                  {order.marketing_id && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Marketing ID:</span>
+                      <span className="font-medium text-right max-w-[60%] truncate">
+                        {order.marketing_id}
+                      </span>
+                    </div>
+                  )}
+                  {order.voucher_id && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Voucher ID:</span>
+                      <span className="font-medium text-right max-w-[60%] truncate">
+                        {order.voucher_id}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Metode Pembayaran:</span>
+                    <span className="font-medium uppercase">
+                      {order.payment_method}
+                    </span>
+                  </div>
+                  {order.payment_amount != null && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Jumlah Pembayaran:</span>
+                      <span className="font-medium">
+                        Rp {formatRupiah(order.payment_amount)}
+                      </span>
+                    </div>
+                  )}
+                  {order.margin_amount != null && order.margin_amount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Margin Marketing:</span>
+                      <span className="font-medium">
+                        Rp {formatRupiah(order.margin_amount)}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Status Pembayaran:</span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-3 py-1 rounded-lg text-sm font-semibold ${getPaymentStatusColor(
+                          order.payment_status
+                        )}`}
+                      >
+                        {getPaymentStatusLabel(order.payment_status)}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setNewPaymentStatus(order.payment_status);
+                          setPaymentStatusModal(true);
+                        }}
+                        className="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                      >
+                        Ubah
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 pt-6 border-t">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-gray-900">Alamat Pengiriman</h3>
-                </div>
-                <p className="text-gray-700">{order.delivery_address}</p>
-                <div className="mt-4">
+              <div className="mt-6 pt-6 border-t space-y-4">
+                <div>
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-600">Catatan untuk Dapur:</span>
+                    <h3 className="font-semibold text-gray-900">Alamat & Detail Acara</h3>
+                  </div>
+                  <p className="text-gray-700 whitespace-pre-line">
+                    {order.delivery_address}
+                  </p>
+
+                  {/* Detail event / referensi / lokasi dari delivery_notes */}
+                  {order.delivery_notes && (() => {
+                    const notes = parseDeliveryNotes(order.delivery_notes, true);
+                    if (!notes) return null;
+
+                    return (
+                      <div className="mt-3 text-sm text-gray-700 bg-gray-50 rounded-lg p-3 space-y-1">
+                        <p className="font-medium text-gray-800 mb-1">
+                          Detail Acara & Pengiriman:
+                        </p>
+                        {Array.isArray(notes) ? (
+                          notes.map((line, idx) => (
+                            <p key={idx}>{line}</p>
+                          ))
+                        ) : (
+                          <p>{notes}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-600">
+                      Catatan Internal (Dapur/Admin):
+                    </span>
                     {!editingNotes && (
                       <button
                         onClick={handleEditNotes}
                         className="text-primary-600 hover:text-primary-800 text-sm font-medium flex items-center gap-1"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                          />
                         </svg>
                         Edit
                       </button>
@@ -297,7 +384,7 @@ const AdminOrderDetail = () => {
                         onChange={(e) => setNotesValue(e.target.value)}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"
                         rows="4"
-                        placeholder="Catatan untuk proses dapur..."
+                        placeholder="Catatan untuk proses dapur atau admin..."
                       />
                       <div className="flex gap-2">
                         <button
@@ -319,35 +406,13 @@ const AdminOrderDetail = () => {
                   ) : (
                     <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 min-h-[60px]">
                       {getNotesDisplay() || (
-                        <span className="text-gray-400 italic">Tidak ada catatan</span>
+                        <span className="text-gray-400 italic">
+                          Tidak ada catatan internal
+                        </span>
                       )}
                     </div>
                   )}
                 </div>
-                {order.delivery_notes && (() => {
-                  const parsedNotes = parseDeliveryNotes(order.delivery_notes, true);
-                  if (!parsedNotes) return null;
-                  
-                  // Show customer notes separately if they exist
-                  let customerNotes = null;
-                  try {
-                    const parsed = typeof order.delivery_notes === 'string' && order.delivery_notes.trim().startsWith('{')
-                      ? JSON.parse(order.delivery_notes)
-                      : { notes: order.delivery_notes };
-                    customerNotes = parsed.notes && parsed.notes !== (parsed.kitchen_notes || parsed.admin_notes) 
-                      ? parsed.notes 
-                      : null;
-                  } catch {}
-                  
-                  if (!customerNotes) return null;
-                  
-                  return (
-                    <div className="mt-4 pt-4 border-t">
-                      <span className="text-sm font-medium text-gray-600">Catatan dari Customer: </span>
-                      <span className="text-sm text-gray-700">{customerNotes}</span>
-                    </div>
-                  );
-                })()}
               </div>
             </div>
 
