@@ -16,6 +16,13 @@ const AdminDashboard = () => {
   const [topProducts, setTopProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const [dateRange, setDateRange] = useState({
+    startDate: firstDayOfMonth.toISOString().split('T')[0],
+    endDate: today.toISOString().split('T')[0],
+  });
+
   useEffect(() => {
     fetchStats();
   }, []);
@@ -35,15 +42,39 @@ const AdminDashboard = () => {
 
   const handleExport = async () => {
     try {
+      if (!dateRange.startDate || !dateRange.endDate) {
+        alert('Silakan pilih rentang tanggal terlebih dahulu');
+        return;
+      }
+
+      const start = new Date(dateRange.startDate);
+      const end = new Date(dateRange.endDate);
+
+      if (start > end) {
+        alert('Tanggal mulai tidak boleh lebih besar dari tanggal akhir');
+        return;
+      }
+
+      const diffMs = end.getTime() - start.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+      if (diffDays > 31) {
+        alert('Rentang tanggal maksimal adalah 31 hari');
+        return;
+      }
+
       const response = await statsAPI.exportSales({
-        startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString(),
-        endDate: new Date().toISOString(),
+        start_date: dateRange.startDate,
+        end_date: dateRange.endDate,
       });
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `laporan-penjualan-${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute(
+        'download',
+        `laporan-penjualan-${dateRange.startDate}-sd-${dateRange.endDate}.csv`
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -69,13 +100,49 @@ const AdminDashboard = () => {
   return (
     <DashboardLayout role="admin">
       <div>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-gray-700">Tanggal Mulai</span>
+              <input
+                type="date"
+                value={dateRange.startDate}
+                onChange={(e) =>
+                  setDateRange((prev) => ({
+                    ...prev,
+                    startDate: e.target.value,
+                  }))
+                }
+                className="mt-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-gray-700">Tanggal Akhir</span>
+              <input
+                type="date"
+                value={dateRange.endDate}
+                onChange={(e) =>
+                  setDateRange((prev) => ({
+                    ...prev,
+                    endDate: e.target.value,
+                  }))
+                }
+                className="mt-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+          </div>
+
           <button
             onClick={handleExport}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition flex items-center"
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition flex items-center self-start"
           >
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
             </svg>
             Export Laporan
           </button>

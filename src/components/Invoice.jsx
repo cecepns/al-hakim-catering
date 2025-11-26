@@ -19,7 +19,7 @@ const Invoice = ({ order, items, company }) => {
                   : headerInvoice
               }
               alt="Logo"
-              className="h-20 mb-4 object-contain"
+              className="h-32 mb-4 object-contain"
             />
           )}
           {/* <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">

@@ -2028,6 +2028,115 @@ app.get('/api/stats/dashboard', authenticateToken, authorizeRole('admin'), async
   }
 });
 
+// Export sales report as CSV with date range filter (max 1 month)
+app.get('/api/stats/export', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ message: 'start_date dan end_date wajib diisi' });
+    }
+
+    const startDate = new Date(start_date);
+    const endDate = new Date(end_date);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({ message: 'Format tanggal tidak valid' });
+    }
+
+    if (startDate > endDate) {
+      return res.status(400).json({ message: 'Tanggal mulai tidak boleh lebih besar dari tanggal akhir' });
+    }
+
+    // Batasi maksimal rentang tanggal 31 hari
+    const diffMs = endDate.getTime() - startDate.getTime();
+    const maxRangeMs = 31 * 24 * 60 * 60 * 1000;
+    if (diffMs > maxRangeMs) {
+      return res.status(400).json({ message: 'Rentang tanggal maksimal adalah 31 hari' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT 
+        o.id,
+        DATE(o.created_at) as tanggal_pesanan,
+        TIME(o.created_at) as waktu_pesanan,
+        COALESCE(o.guest_customer_name, u.name) as customer_name,
+        COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+        o.guest_event_name,
+        o.guest_event_date,
+        o.guest_event_time,
+        o.payment_method,
+        o.payment_status,
+        o.status,
+        o.total_amount,
+        o.discount_amount,
+        o.cashback_used,
+        o.final_amount
+      FROM orders o
+      JOIN users u ON o.user_id = u.id
+      WHERE o.status != 'dibatalkan'
+        AND DATE(o.created_at) BETWEEN ? AND ?
+      ORDER BY o.created_at ASC`,
+      [start_date, end_date]
+    );
+
+    const escapeCsv = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value).replace(/"/g, '""');
+      return /[",\n]/.test(str) ? `"${str}"` : str;
+    };
+
+    const header = [
+      'Tanggal Pesanan',
+      'Waktu Pesanan',
+      'ID Pesanan',
+      'Nama Customer',
+      'No. WA Customer',
+      'Nama Acara',
+      'Tanggal Acara',
+      'Waktu Acara',
+      'Metode Pembayaran',
+      'Status Pembayaran',
+      'Status Pesanan',
+      'Total Amount',
+      'Diskon',
+      'Cashback Digunakan',
+      'Final Amount'
+    ];
+
+    const csvRows = [header.join(',')];
+
+    rows.forEach((row) => {
+      csvRows.push([
+        escapeCsv(row.tanggal_pesanan),
+        escapeCsv(row.waktu_pesanan),
+        escapeCsv(row.id),
+        escapeCsv(row.customer_name),
+        escapeCsv(row.customer_phone),
+        escapeCsv(row.guest_event_name),
+        escapeCsv(row.guest_event_date),
+        escapeCsv(row.guest_event_time),
+        escapeCsv(row.payment_method),
+        escapeCsv(row.payment_status),
+        escapeCsv(row.status),
+        escapeCsv(row.total_amount),
+        escapeCsv(row.discount_amount),
+        escapeCsv(row.cashback_used),
+        escapeCsv(row.final_amount),
+      ].join(','));
+    });
+
+    const filename = `laporan-penjualan-${start_date}-sd-${end_date}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvRows.join('\n'));
+  } catch (error) {
+    console.error('Export sales stats error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mengekspor laporan' });
+  }
+});
+
 app.get('/api/cart', authenticateToken, async (req, res) => {
   try {
     const [cart] = await pool.query(

@@ -146,10 +146,11 @@ export const statsAPI = {
   getDashboard: () => api.get('/stats/dashboard'),
   getSales: (params) => api.get('/stats/sales', { params }),
   getProducts: () => api.get('/stats/products'),
-  exportSales: (params) => api.get('/stats/export', {
-    params,
-    responseType: 'blob'
-  }),
+  exportSales: (params) =>
+    api.get('/stats/export', {
+      params,
+      responseType: 'blob',
+    }),
 };
 
 export const userAPI = {
