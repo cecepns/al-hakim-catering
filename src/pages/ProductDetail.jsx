@@ -84,6 +84,42 @@ const ProductDetail = () => {
     }
   };
 
+  const handleBuyNow = async () => {
+    if (!user) {
+      toast.warning(
+        "Silakan login terlebih dahulu untuk melakukan pembelian",
+        {
+          position: "top-center",
+          autoClose: 2000,
+        }
+      );
+      setTimeout(() => {
+        navigate("/login");
+      }, 2000);
+      return;
+    }
+
+    if (user.role !== "pembeli") {
+      toast.error("Hanya pembeli yang dapat melakukan pembelian");
+      return;
+    }
+
+    try {
+      await addToCart({
+        product_id: product.id,
+        variant_id: selectedVariation?.id || null,
+        quantity,
+      });
+      toast.success("Produk berhasil ditambahkan ke keranjang!");
+      setTimeout(() => {
+        navigate("/pembeli/checkout");
+      }, 1000);
+    } catch (err) {
+      console.error("Error adding to cart:", err);
+      toast.error("Gagal melakukan pembelian");
+    }
+  };
+
   const handleVariationToggle = (variation) => {
     // If clicking a variant that's already selected, deselect it (unselect)
     if (selectedVariation?.id === variation.id) {
@@ -476,14 +512,23 @@ const ProductDetail = () => {
                 </div>
               </div>
 
-              {/* ADD TO CART BUTTON */}
-              <button
-                onClick={handleAddToCart}
-                disabled={product.stock === 0}
-                className="w-full bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition font-semibold disabled:bg-gray-400"
-              >
-                {product.stock === 0 ? "Stok Habis" : "Tambah ke Keranjang"}
-              </button>
+              {/* ADD TO CART AND BUY NOW BUTTONS */}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleAddToCart}
+                  disabled={product.stock === 0}
+                  className="flex-1 bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition font-semibold disabled:bg-gray-400"
+                >
+                  {product.stock === 0 ? "Stok Habis" : "Tambah ke Keranjang"}
+                </button>
+                <button
+                  onClick={handleBuyNow}
+                  disabled={product.stock === 0}
+                  className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold disabled:bg-gray-400"
+                >
+                  {product.stock === 0 ? "Stok Habis" : "Beli Sekarang"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
