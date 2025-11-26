@@ -121,7 +121,7 @@ const Home = () => {
                   alt={banner.title}
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center text-white px-4">
                     {banner.title && (
                       <h1 className="text-xl md:text-6xl font-bold mb-4">
