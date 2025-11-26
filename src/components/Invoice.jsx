@@ -2,10 +2,14 @@ import { formatRupiah, parseDeliveryNotes } from '../utils/formatHelper';
 
 const Invoice = ({ order, items, company }) => {
   return (
-    <div id="invoice-content" className="bg-white p-8 max-w-4xl mx-auto" style={{ fontFamily: 'Arial, sans-serif' }}>
+    <div
+      id="invoice-content"
+      className="bg-white p-4 sm:p-8 max-w-4xl mx-auto"
+      style={{ fontFamily: 'Arial, sans-serif' }}
+    >
       {/* Header */}
-      <div className="flex justify-between items-start mb-8 border-b-2 border-gray-300 pb-6">
-        <div>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-8 border-b-2 border-gray-300 pb-6">
+        <div className="md:flex-1">
           {company.company_logo_url && (
             <img 
               src={`https://api-inventory.isavralabel.com/al-hakim${company.company_logo_url}`}
@@ -13,7 +17,9 @@ const Invoice = ({ order, items, company }) => {
               className="h-20 mb-4"
             />
           )}
-          <h1 className="text-3xl font-bold text-gray-900">{company.company_name || 'Al Hakim Catering'}</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            {company.company_name || 'Al Hakim Catering'}
+          </h1>
           {company.company_address && (
             <p className="text-gray-600 mt-2">{company.company_address}</p>
           )}
@@ -23,8 +29,8 @@ const Invoice = ({ order, items, company }) => {
             {company.tax_id && <p>NPWP: {company.tax_id}</p>}
           </div>
         </div>
-        <div className="text-right">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">FAKTUR / NOTA</h2>
+        <div className="text-left md:text-right md:flex-1">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">FAKTUR / NOTA</h2>
           <p className="text-gray-600">No. Pesanan: #{order.id}</p>
           <p className="text-gray-600">Tanggal: {new Date(order.created_at).toLocaleDateString('id-ID', {
             day: '2-digit',
@@ -35,7 +41,7 @@ const Invoice = ({ order, items, company }) => {
       </div>
 
       {/* Customer & Payment Info */}
-      <div className="mb-8 grid grid-cols-2 gap-8">
+      <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
         <div>
           <h3 className="font-semibold text-gray-900 mb-2">Kepada:</h3>
           <p className="text-gray-700 font-medium">{order.customer_name}</p>

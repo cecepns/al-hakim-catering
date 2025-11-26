@@ -87,7 +87,7 @@ const InvoiceModal = ({ isOpen, onClose, orderId }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full my-8">
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <h2 className="text-xl font-bold text-gray-900">Faktur / Nota Pesanan #{orderId}</h2>
@@ -114,18 +114,23 @@ const InvoiceModal = ({ isOpen, onClose, orderId }) => {
             </button>
           </div>
         </div>
-        <div className="p-6 overflow-y-auto max-h-[calc(100vh-200px)]">
+        <div className="p-4 sm:p-6 overflow-auto max-h-[calc(100vh-180px)]">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
             </div>
           ) : invoiceData ? (
-            <div ref={invoiceRef}>
-              <Invoice
-                order={invoiceData.order}
-                items={invoiceData.items}
-                company={invoiceData.company}
-              />
+            <div className="overflow-x-auto">
+              <div
+                ref={invoiceRef}
+                className="min-w-[800px] sm:min-w-0"
+              >
+                <Invoice
+                  order={invoiceData.order}
+                  items={invoiceData.items}
+                  company={invoiceData.company}
+                />
+              </div>
             </div>
           ) : (
             <div className="text-center py-12">
