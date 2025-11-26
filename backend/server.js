@@ -103,7 +103,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    const [users] = await pool.query('SELECT * FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)', [email]);
 
     if (users.length === 0) {
       return res.status(401).json({ message: 'Email atau password salah' });
@@ -376,6 +376,7 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         o.guest_wa_number_1,
         o.guest_wa_number_2,
         o.guest_event_date,
+        o.guest_event_time,
         GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories,
         COUNT(DISTINCT oi.id) as items_count,
         GROUP_CONCAT(DISTINCT CONCAT(oi.product_name, IF(oi.variant_name IS NOT NULL, CONCAT(' (', oi.variant_name, ')'), ''), ' x', oi.quantity) ORDER BY oi.id SEPARATOR ', ') as items_summary,
@@ -1908,6 +1909,53 @@ app.put('/api/admin/orders/:id/payment-status', authenticateToken, authorizeRole
   }
 });
 
+// Update order notes (delivery_notes) - Admin
+app.put('/api/admin/orders/:id/notes', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    // Check if order exists
+    const [orders] = await pool.query('SELECT id, delivery_notes FROM orders WHERE id = ?', [id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    const currentNotes = orders[0].delivery_notes;
+    let updatedNotes = notes || '';
+
+    // If current notes is JSON and we want to preserve structure
+    if (currentNotes) {
+      try {
+        const parsedNotes = typeof currentNotes === 'string' && currentNotes.trim().startsWith('{') 
+          ? JSON.parse(currentNotes) 
+          : { notes: currentNotes };
+        
+        // Update or add kitchen_notes field
+        parsedNotes.kitchen_notes = notes || '';
+        parsedNotes.admin_notes = notes || '';
+        
+        updatedNotes = JSON.stringify(parsedNotes);
+      } catch {
+        // If not JSON, just use the notes as plain text or create JSON structure
+        updatedNotes = JSON.stringify({ notes: notes || '', kitchen_notes: notes || '', admin_notes: notes || '' });
+      }
+    } else {
+      updatedNotes = JSON.stringify({ notes: notes || '', kitchen_notes: notes || '', admin_notes: notes || '' });
+    }
+
+    await pool.query(
+      'UPDATE orders SET delivery_notes = ? WHERE id = ?',
+      [updatedNotes, id]
+    );
+
+    res.json({ message: 'Catatan berhasil diupdate' });
+  } catch (error) {
+    console.error('Update order notes error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
 app.get('/api/stats/dashboard', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const [todaySales] = await pool.query(
@@ -2116,12 +2164,140 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
 app.get('/api/users', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const [users] = await pool.query(
-      'SELECT id, name, email, phone, address, role, cashback_balance, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, name, email, phone, address, role, cashback_balance, is_active, created_at FROM users ORDER BY created_at DESC'
     );
 
     res.json(users);
   } catch (error) {
     console.error('Get users error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.get('/api/users/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [users] = await pool.query(
+      'SELECT id, name, email, phone, address, role, cashback_balance, is_active, created_at FROM users WHERE id = ?',
+      [id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ message: 'User tidak ditemukan' });
+    }
+
+    res.json(users[0]);
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/users', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { name, email, password, phone, address, role } = req.body;
+
+    if (!name || !email || !password || !phone) {
+      return res.status(400).json({ message: 'Nama, email, password, dan telepon harus diisi' });
+    }
+
+    // Check if email already exists
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(400).json({ message: 'Email sudah terdaftar' });
+    }
+
+    // Validate role
+    const validRoles = ['pembeli', 'admin', 'marketing', 'operasional', 'dapur', 'kurir'];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Role tidak valid' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const [result] = await pool.query(
+      'INSERT INTO users (name, email, password, phone, address, role, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, email, hashedPassword, phone || null, address || null, role || 'pembeli', 1]
+    );
+
+    res.status(201).json({
+      message: 'User berhasil dibuat',
+      user: { id: result.insertId, name, email, phone, role: role || 'pembeli' }
+    });
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat membuat user' });
+  }
+});
+
+app.put('/api/users/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, password, phone, address, role } = req.body;
+
+    // Check if user exists
+    const [users] = await pool.query('SELECT id, email FROM users WHERE id = ?', [id]);
+    if (users.length === 0) {
+      return res.status(404).json({ message: 'User tidak ditemukan' });
+    }
+
+    // Check if email is being changed and already exists
+    if (email && email !== users[0].email) {
+      const [existing] = await pool.query('SELECT id FROM users WHERE email = ? AND id != ?', [email, id]);
+      if (existing.length > 0) {
+        return res.status(400).json({ message: 'Email sudah terdaftar' });
+      }
+    }
+
+    // Validate role if provided
+    const validRoles = ['pembeli', 'admin', 'marketing', 'operasional', 'dapur', 'kurir'];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Role tidak valid' });
+    }
+
+    // Build update query dynamically
+    const updateFields = [];
+    const updateParams = [];
+
+    if (name) {
+      updateFields.push('name = ?');
+      updateParams.push(name);
+    }
+    if (email) {
+      updateFields.push('email = ?');
+      updateParams.push(email);
+    }
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updateFields.push('password = ?');
+      updateParams.push(hashedPassword);
+    }
+    if (phone !== undefined) {
+      updateFields.push('phone = ?');
+      updateParams.push(phone || null);
+    }
+    if (address !== undefined) {
+      updateFields.push('address = ?');
+      updateParams.push(address || null);
+    }
+    if (role) {
+      updateFields.push('role = ?');
+      updateParams.push(role);
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
+    }
+
+    updateParams.push(id);
+    await pool.query(
+      `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateParams
+    );
+
+    res.json({ message: 'User berhasil diupdate' });
+  } catch (error) {
+    console.error('Update user error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
@@ -2135,6 +2311,31 @@ app.put('/api/users/:id/role', authenticateToken, authorizeRole('admin'), async 
     res.json({ message: 'Role user berhasil diupdate' });
   } catch (error) {
     console.error('Update user role error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.put('/api/users/:id/toggle-active', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    // Check if user exists
+    const [users] = await pool.query('SELECT id FROM users WHERE id = ?', [id]);
+    if (users.length === 0) {
+      return res.status(404).json({ message: 'User tidak ditemukan' });
+    }
+
+    // Prevent deactivating yourself
+    if (parseInt(id) === req.user.id && !is_active) {
+      return res.status(400).json({ message: 'Tidak dapat menonaktifkan akun sendiri' });
+    }
+
+    await pool.query('UPDATE users SET is_active = ? WHERE id = ?', [is_active ? 1 : 0, id]);
+
+    res.json({ message: `User berhasil ${is_active ? 'diaktifkan' : 'dinonaktifkan'}` });
+  } catch (error) {
+    console.error('Toggle user active error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });

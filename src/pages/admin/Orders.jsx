@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import InvoiceModal from '../../components/InvoiceModal';
 
@@ -11,6 +11,9 @@ const AdminOrders = () => {
   const [filter, setFilter] = useState('all');
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [editingNotes, setEditingNotes] = useState(null);
+  const [notesValue, setNotesValue] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -27,6 +30,44 @@ const AdminOrders = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditNotes = (order) => {
+    // Extract kitchen notes or admin notes from delivery_notes
+    let existingNotes = '';
+    if (order.delivery_notes) {
+      try {
+        const parsed = typeof order.delivery_notes === 'string' && order.delivery_notes.trim().startsWith('{')
+          ? JSON.parse(order.delivery_notes)
+          : { notes: order.delivery_notes };
+        existingNotes = parsed.kitchen_notes || parsed.admin_notes || parsed.notes || '';
+      } catch {
+        existingNotes = order.delivery_notes || '';
+      }
+    }
+    setEditingNotes(order.id);
+    setNotesValue(existingNotes);
+  };
+
+  const handleSaveNotes = async (orderId) => {
+    try {
+      setSavingNotes(true);
+      await orderAPI.updateNotes(orderId, { notes: notesValue });
+      alert('Catatan berhasil disimpan');
+      setEditingNotes(null);
+      setNotesValue('');
+      fetchOrders();
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      alert('Gagal menyimpan catatan');
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingNotes(null);
+    setNotesValue('');
   };
 
   const getStatusColor = (status) => {
@@ -49,6 +90,18 @@ const AdminOrders = () => {
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
+  const getNotesDisplay = (order) => {
+    if (!order.delivery_notes) return '-';
+    try {
+      const parsed = typeof order.delivery_notes === 'string' && order.delivery_notes.trim().startsWith('{')
+        ? JSON.parse(order.delivery_notes)
+        : { notes: order.delivery_notes };
+      return parsed.kitchen_notes || parsed.admin_notes || parsed.notes || '-';
+    } catch {
+      return order.delivery_notes || '-';
+    }
+  };
+
   const statuses = [
     { value: 'all', label: 'Semua' },
     { value: 'dibuat', label: 'Dibuat' },
@@ -57,6 +110,12 @@ const AdminOrders = () => {
     { value: 'selesai', label: 'Selesai' },
     { value: 'dibatalkan', label: 'Dibatalkan' },
   ];
+
+  const formatTime = (time) => {
+    if (!time) return '-';
+    // Format time from HH:MM:SS to HH:MM
+    return time.substring(0, 5);
+  };
 
   return (
     <DashboardLayout role="admin">
@@ -108,28 +167,40 @@ const AdminOrders = () => {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[1400px]">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      ID Pesanan
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Id Pesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Pelanggan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tanggal
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      No. WA
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Total
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Alamat
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Kategori
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Tgl Acara
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Jam Acara
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Pembayaran
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Catatan
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Aksi
                     </th>
                   </tr>
@@ -137,48 +208,121 @@ const AdminOrders = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         #{order.id}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {order.customer_name}
+                      <td className="px-4 py-4 whitespace-nowrap text-sm">
+                        <div className="font-medium text-gray-900">{order.customer_name}</div>
+                        <div className="text-gray-500 text-xs">{order.customer_email}</div>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {order.customer_phone || order.guest_wa_number_1 || '-'}
+                        {order.guest_wa_number_2 && (
+                          <div className="text-xs text-gray-500">{order.guest_wa_number_2}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-600 max-w-xs">
+                        <div className="truncate" title={order.delivery_address}>
+                          {order.delivery_address || '-'}
                         </div>
-                        <div className="text-sm text-gray-500">{order.customer_email}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {new Date(order.created_at).toLocaleDateString('id-ID', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {order.categories || '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        Rp {formatRupiah(order.final_amount)}
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {order.guest_event_date
+                          ? new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })
+                          : '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                        {formatTime(order.guest_event_time)}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-sm">
+                        <div className="flex flex-col gap-1">
+                          <span
+                            className={`px-2 py-1 inline-flex text-xs leading-4 font-semibold rounded-full ${getPaymentStatusColor(
+                              order.payment_status
+                            )}`}
+                          >
+                            {order.payment_method} - {order.payment_status}
+                          </span>
+                          <span className="text-xs text-gray-600">
+                            Rp {formatRupiah(order.final_amount)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-600 min-w-[200px]">
+                        {editingNotes === order.id ? (
+                          <div className="space-y-2">
+                            <textarea
+                              value={notesValue}
+                              onChange={(e) => setNotesValue(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded resize-none"
+                              rows="3"
+                              placeholder="Catatan untuk proses dapur..."
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleSaveNotes(order.id)}
+                                disabled={savingNotes}
+                                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                              >
+                                {savingNotes ? 'Menyimpan...' : 'Simpan'}
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                disabled={savingNotes}
+                                className="px-2 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="group relative">
+                            <div className="truncate max-w-[200px]" title={getNotesDisplay(order)}>
+                              {getNotesDisplay(order) || '-'}
+                            </div>
+                            <button
+                              onClick={() => handleEditNotes(order)}
+                              className="ml-2 text-primary-600 hover:text-primary-800 text-xs opacity-0 group-hover:opacity-100 transition"
+                              title="Edit catatan"
+                            >
+                              <svg
+                                className="w-4 h-4 inline"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
                         <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(
-                            order.payment_status
-                          )}`}
-                        >
-                          {order.payment_method} - {order.payment_status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
+                          className={`px-2 py-1 inline-flex text-xs leading-4 font-semibold rounded-full ${getStatusColor(
                             order.status
                           )}`}
                         >
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center gap-3">
+                      <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex items-center gap-2">
                           <Link
                             to={`/admin/orders/${order.id}`}
-                            className="text-primary-600 hover:text-primary-900"
+                            className="text-primary-600 hover:text-primary-900 text-xs"
                           >
                             Detail
                           </Link>
@@ -188,7 +332,7 @@ const AdminOrders = () => {
                                 setSelectedOrderId(order.id);
                                 setInvoiceModalOpen(true);
                               }}
-                              className="text-green-600 hover:text-green-900"
+                              className="text-green-600 hover:text-green-900 text-xs"
                               title="Lihat Faktur/Nota"
                             >
                               Faktur

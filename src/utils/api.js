@@ -71,6 +71,7 @@ export const orderAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   updatePaymentStatus: (id, data) => api.put(`/admin/orders/${id}/payment-status`, data),
+  updateNotes: (id, data) => api.put(`/admin/orders/${id}/notes`, data),
   getInvoice: (id) => api.get(`/orders/${id}/invoice`),
   pinOrder: (id, is_pinned) => api.put(`/orders/${id}/pin`, { is_pinned }),
   getReview: (id) => api.get(`/orders/${id}/review`),
@@ -158,6 +159,7 @@ export const userAPI = {
   update: (id, data) => api.put(`/users/${id}`, data),
   delete: (id) => api.delete(`/users/${id}`),
   updateRole: (id, role) => api.put(`/users/${id}/role`, { role }),
+  toggleActive: (id, is_active) => api.put(`/users/${id}/toggle-active`, { is_active }),
 };
 
 export const cartAPI = {
