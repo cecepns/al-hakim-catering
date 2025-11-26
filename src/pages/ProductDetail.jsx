@@ -69,10 +69,15 @@ const ProductDetail = () => {
     }
 
     try {
+      // Get selected addon IDs
+      const addonIds = Object.keys(selectedAddons).filter(id => selectedAddons[id]).map(id => parseInt(id));
+      
       await addToCart({
         product_id: product.id,
         variant_id: selectedVariation?.id || null,
         quantity,
+        addon_ids: addonIds.length > 0 ? addonIds : null,
+        total_price: calculateTotalPrice,
       });
       toast.success("Produk berhasil ditambahkan ke keranjang!");
       setTimeout(() => {
@@ -106,25 +111,30 @@ const ProductDetail = () => {
     }
 
     try {
-      await addToCart({
+      // Get selected addon IDs
+      const addonIds = Object.keys(selectedAddons).filter(id => selectedAddons[id]).map(id => parseInt(id));
+      
+      // All roles: skip cart, redirect directly to checkout with product data
+      const directCheckoutData = {
         product_id: product.id,
         variant_id: selectedVariation?.id || null,
         quantity,
-      });
-      toast.success("Produk berhasil ditambahkan!");
+        addon_ids: addonIds.length > 0 ? addonIds : null,
+        total_price: calculateTotalPrice,
+        product_name: product.name,
+        variant_name: selectedVariation?.name || null,
+        price: getDisplayPrice,
+        discounted_price: getDiscountedDisplayPrice,
+        addons: addons.filter(addon => selectedAddons[addon.id]).map(addon => ({
+          id: addon.id,
+          name: addon.name,
+          price: addon.price
+        }))
+      };
       
-      // Redirect based on role
-      setTimeout(() => {
-        if (user.role === "pembeli") {
-          // Pembeli: redirect to cart page
-          navigate("/pembeli/cart");
-        } else {
-          // Admin & Marketing: redirect directly to checkout
-          navigate("/pembeli/checkout");
-        }
-      }, 1000);
+      navigate("/pembeli/checkout", { state: { directCheckout: directCheckoutData } });
     } catch (err) {
-      console.error("Error adding to cart:", err);
+      console.error("Error processing purchase:", err);
       toast.error("Gagal melakukan pembelian");
     }
   };

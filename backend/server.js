@@ -1958,16 +1958,53 @@ app.get('/api/stats/dashboard', authenticateToken, authorizeRole('admin'), async
 app.get('/api/cart', authenticateToken, async (req, res) => {
   try {
     const [cart] = await pool.query(
-      `SELECT c.*, p.name, p.price, p.discounted_price, p.image_url, pv.name as variant_name, pvi.image_url as variant_image_url
+      `SELECT c.*, 
+              p.name, 
+              p.price, 
+              p.discounted_price, 
+              COALESCE(
+                (SELECT image_url FROM product_variant_images WHERE variant_id = c.variant_id AND is_primary = 1 LIMIT 1),
+                (SELECT media_url FROM product_images WHERE product_id = c.product_id AND is_primary = 1 LIMIT 1),
+                (SELECT media_url FROM product_images WHERE product_id = c.product_id ORDER BY display_order LIMIT 1),
+                p.image_url
+              ) as image_url,
+              pv.name as variant_name, 
+              (SELECT image_url FROM product_variant_images WHERE variant_id = c.variant_id AND is_primary = 1 LIMIT 1) as variant_image_url
        FROM cart c
        JOIN products p ON c.product_id = p.id
        LEFT JOIN product_variants pv ON c.variant_id = pv.id
-       LEFT JOIN product_variant_images pvi ON c.variant_id = pvi.variant_id
-       WHERE c.user_id = ?`,
+       WHERE c.user_id = ?
+       ORDER BY c.created_at DESC`,
       [req.user.id]
     );
 
-    res.json(cart);
+    // Parse addon_ids JSON and calculate price if total_price is null
+    const cartWithAddons = cart.map(item => {
+      let addonIds = [];
+      if (item.addon_ids) {
+        try {
+          addonIds = typeof item.addon_ids === 'string' ? JSON.parse(item.addon_ids) : item.addon_ids;
+        } catch (e) {
+          console.error('Error parsing addon_ids:', e);
+          addonIds = [];
+        }
+      }
+
+      // If total_price is null, calculate it from product price
+      let finalPrice = item.total_price;
+      if (!finalPrice) {
+        const basePrice = parseFloat(item.discounted_price || item.price || 0);
+        finalPrice = basePrice * item.quantity;
+      }
+
+      return {
+        ...item,
+        addon_ids: addonIds,
+        total_price: finalPrice
+      };
+    });
+
+    res.json(cartWithAddons);
   } catch (error) {
     console.error('Get cart error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
@@ -1976,7 +2013,12 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
 
 app.post('/api/cart', authenticateToken, async (req, res) => {
   try {
-    const { product_id, variant_id, quantity } = req.body;
+    const { product_id, variant_id, quantity, addon_ids, total_price } = req.body;
+
+    // Convert addon_ids to JSON string if it's an array
+    const addonIdsJson = addon_ids && Array.isArray(addon_ids) && addon_ids.length > 0 
+      ? JSON.stringify(addon_ids) 
+      : null;
 
     const [existing] = await pool.query(
       'SELECT id, quantity FROM cart WHERE user_id = ? AND product_id = ? AND (variant_id = ? OR (variant_id IS NULL AND ? IS NULL))',
@@ -1984,14 +2026,23 @@ app.post('/api/cart', authenticateToken, async (req, res) => {
     );
 
     if (existing.length > 0) {
-      await pool.query(
-        'UPDATE cart SET quantity = quantity + ? WHERE id = ?',
-        [quantity, existing[0].id]
-      );
+      // Update existing cart item
+      if (total_price !== undefined && total_price !== null) {
+        await pool.query(
+          'UPDATE cart SET quantity = quantity + ?, addon_ids = ?, total_price = ? WHERE id = ?',
+          [quantity, addonIdsJson, total_price, existing[0].id]
+        );
+      } else {
+        await pool.query(
+          'UPDATE cart SET quantity = quantity + ?, addon_ids = ? WHERE id = ?',
+          [quantity, addonIdsJson, existing[0].id]
+        );
+      }
     } else {
+      // Insert new cart item
       await pool.query(
-        'INSERT INTO cart (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)',
-        [req.user.id, product_id, variant_id, quantity]
+        'INSERT INTO cart (user_id, product_id, variant_id, addon_ids, quantity, total_price) VALUES (?, ?, ?, ?, ?, ?)',
+        [req.user.id, product_id, variant_id, addonIdsJson, quantity, total_price || null]
       );
     }
 
@@ -2006,9 +2057,28 @@ app.put('/api/cart/:id', authenticateToken, async (req, res) => {
   try {
     const { quantity } = req.body;
 
+    // Get current cart item to recalculate total_price
+    const [currentCart] = await pool.query(
+      'SELECT quantity, total_price FROM cart WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (currentCart.length === 0) {
+      return res.status(404).json({ message: 'Item tidak ditemukan' });
+    }
+
+    const currentItem = currentCart[0];
+    let newTotalPrice = null;
+
+    // If total_price exists, recalculate based on quantity ratio
+    if (currentItem.total_price && currentItem.quantity > 0) {
+      const pricePerUnit = currentItem.total_price / currentItem.quantity;
+      newTotalPrice = pricePerUnit * quantity;
+    }
+
     await pool.query(
-      'UPDATE cart SET quantity = ? WHERE id = ? AND user_id = ?',
-      [quantity, req.params.id, req.user.id]
+      'UPDATE cart SET quantity = ?, total_price = ? WHERE id = ? AND user_id = ?',
+      [quantity, newTotalPrice, req.params.id, req.user.id]
     );
 
     res.json({ message: 'Keranjang berhasil diupdate' });

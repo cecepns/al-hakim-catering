@@ -64,7 +64,11 @@ export const CartProvider = ({ children }) => {
   };
 
   const getCartTotal = () => {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return cart.reduce((total, item) => {
+      // Use total_price if available (includes variant + addon), otherwise calculate from price
+      const itemTotal = item.total_price || ((item.discounted_price || item.price) * item.quantity);
+      return total + itemTotal;
+    }, 0);
   };
 
   const getCartCount = () => {

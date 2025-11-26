@@ -73,8 +73,13 @@ const Cart = () => {
                       {item.variant_name && (
                         <p className="text-sm text-gray-600">Varian: {item.variant_name}</p>
                       )}
+                      {item.addon_ids && item.addon_ids.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Add-on: {item.addon_ids.length} item{item.addon_ids.length > 1 ? 's' : ''}
+                        </p>
+                      )}
                       <p className="text-lg font-bold text-primary-600 mt-2">
-                        Rp {formatRupiah((item.discounted_price || item.price) * item.quantity)}
+                        Rp {formatRupiah(item.total_price || ((item.discounted_price || item.price) * item.quantity))}
                       </p>
                     </div>
                     <div className="flex items-center space-x-3">

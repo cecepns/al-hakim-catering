@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { MapPin, Calendar, Clock, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, CheckCircle2, User } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
@@ -11,8 +11,10 @@ import DashboardLayout from '../../components/DashboardLayout';
 
 const Checkout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { cart, getCartTotal, clearCart } = useCart();
   const { user } = useAuth();
+  const directCheckout = location.state?.directCheckout || null;
   const [loading, setLoading] = useState(false);
   const [voucherCode, setVoucherCode] = useState('');
   const [voucher, setVoucher] = useState(null);
@@ -43,7 +45,8 @@ const Checkout = () => {
   });
 
   useEffect(() => {
-    if (cart.length === 0) {
+    // Allow direct checkout for admin/marketing (no cart needed)
+    if (!directCheckout && cart.length === 0) {
       toast.warning('Keranjang kosong');
       navigate('/pembeli/cart');
       return;
@@ -72,6 +75,31 @@ const Checkout = () => {
     }
   };
 
+  // Helper to get current items (from cart or direct checkout)
+  const getCurrentItems = () => {
+    if (directCheckout) {
+      return [{
+        product_id: directCheckout.product_id,
+        variant_id: directCheckout.variant_id,
+        quantity: directCheckout.quantity,
+        name: directCheckout.product_name,
+        variant_name: directCheckout.variant_name,
+        price: directCheckout.price,
+        discounted_price: directCheckout.discounted_price,
+        total_price: directCheckout.total_price
+      }];
+    }
+    return cart;
+  };
+
+  // Helper to get current subtotal
+  const getCurrentSubtotal = () => {
+    if (directCheckout) {
+      return directCheckout.total_price;
+    }
+    return getCartTotal();
+  };
+
   const handleValidateVoucher = async () => {
     if (!voucherCode.trim()) {
       setVoucherError('Masukkan kode voucher');
@@ -81,7 +109,7 @@ const Checkout = () => {
     try {
       setVoucherError('');
       const response = await voucherAPI.validate(voucherCode);
-      const subtotal = getCartTotal();
+      const subtotal = getCurrentSubtotal();
       
       if (subtotal < response.data.min_purchase) {
         setVoucherError(`Minimal pembelian Rp ${formatRupiah(response.data.min_purchase)}`);
@@ -99,7 +127,7 @@ const Checkout = () => {
   const calculateDiscount = () => {
     if (!voucher) return 0;
     
-    const subtotal = getCartTotal();
+    const subtotal = getCurrentSubtotal();
     if (subtotal < voucher.min_purchase) return 0;
 
     if (voucher.discount_type === 'percentage') {
@@ -113,7 +141,7 @@ const Checkout = () => {
   };
 
   const calculateTotal = () => {
-    const subtotal = getCartTotal();
+    const subtotal = getCurrentSubtotal();
     const discount = calculateDiscount();
     const baseAmount = subtotal - discount - cashbackUsed;
     const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
@@ -122,14 +150,14 @@ const Checkout = () => {
   };
 
   const getBaseAmount = () => {
-    const subtotal = getCartTotal();
+    const subtotal = getCurrentSubtotal();
     const discount = calculateDiscount();
     return subtotal - discount - cashbackUsed;
   };
 
   const handleCashbackChange = (e) => {
     const amount = parseFloat(e.target.value) || 0;
-    const subtotal = getCartTotal();
+    const subtotal = getCurrentSubtotal();
     const discount = calculateDiscount();
     const maxAvailable = Math.min(cashbackBalance, subtotal - discount);
     const actualAmount = Math.min(amount, maxAvailable);
@@ -164,11 +192,19 @@ const Checkout = () => {
     try {
       setLoading(true);
 
-      const items = cart.map(item => ({
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        quantity: item.quantity
-      }));
+      // Use direct checkout items if available, otherwise use cart
+      const items = directCheckout 
+        ? [{
+            product_id: directCheckout.product_id,
+            variant_id: directCheckout.variant_id,
+            quantity: directCheckout.quantity,
+            addon_ids: directCheckout.addon_ids
+          }]
+        : cart.map(item => ({
+            product_id: item.product_id,
+            variant_id: item.variant_id,
+            quantity: item.quantity
+          }));
 
       // Prepare delivery_notes as JSON for backend
       const deliveryNotesData = {
@@ -221,8 +257,10 @@ const Checkout = () => {
         await orderAPI.create(orderData);
       }
       
-      // Clear cart after successful order
-      await clearCart();
+      // Clear cart after successful order (only if not direct checkout)
+      if (!directCheckout) {
+        await clearCart();
+      }
       
       toast.success('Pesanan berhasil dibuat!');
       setTimeout(() => {
@@ -236,9 +274,14 @@ const Checkout = () => {
     }
   };
 
-  if (cart.length === 0) {
+  const currentItems = getCurrentItems();
+  const subtotal = getCurrentSubtotal();
+  const discount = calculateDiscount();
+  const finalTotal = calculateTotal();
+
+  if (!directCheckout && cart.length === 0) {
     return (
-      <DashboardLayout role="pembeli">
+      <DashboardLayout role={user?.role || 'pembeli'}>
         <div className="text-center py-12">
           <p className="text-gray-600">Keranjang kosong</p>
           <button
@@ -252,12 +295,8 @@ const Checkout = () => {
     );
   }
 
-  const subtotal = getCartTotal();
-  const discount = calculateDiscount();
-  const finalTotal = calculateTotal();
-
   return (
-    <DashboardLayout role="pembeli">
+    <DashboardLayout role={user?.role || 'pembeli'}>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">
           FORMAT PEMESANAN AL-HAKIM CATERING
@@ -478,12 +517,24 @@ const Checkout = () => {
             <div className="bg-gray-50 rounded-lg p-4 space-y-3 mb-4">
               {/* Cart Items Summary */}
               <div className="space-y-2">
-                {cart.map((item) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span>{item.name} {item.variant_name && `(${item.variant_name})`} x{item.quantity}</span>
-                    <span>Rp {formatRupiah((item.discounted_price || item.price) * item.quantity)}</span>
-                  </div>
-                ))}
+                {currentItems.map((item, index) => {
+                  const itemKey = directCheckout ? `direct-${index}` : item.id;
+                  const itemPrice = directCheckout 
+                    ? item.total_price 
+                    : (item.discounted_price || item.price) * item.quantity;
+                  const addonText = directCheckout && directCheckout.addons?.length > 0
+                    ? ` + ${directCheckout.addons.map(a => a.name).join(', ')}`
+                    : '';
+                  
+                  return (
+                    <div key={itemKey} className="flex justify-between text-sm">
+                      <span>
+                        {item.name} {item.variant_name && `(${item.variant_name})`}{addonText} x{item.quantity}
+                      </span>
+                      <span>Rp {formatRupiah(itemPrice)}</span>
+                    </div>
+                  );
+                })}
               </div>
               <div className="border-t pt-2 flex justify-between">
                 <span className="font-medium">Subtotal:</span>

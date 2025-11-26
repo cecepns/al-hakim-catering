@@ -255,17 +255,17 @@ const Products = () => {
                   <div className="flex space-x-2">
                     <Link
                       to={`/products/${product.id}`}
-                      className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-center text-sm font-medium"
+                      className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition text-center text-sm font-medium"
                     >
-                      Detail
+                      Lihat Detail Produk
                     </Link>
-                    <button
+                    {/* <button
                       onClick={() => handleBuyNow(product)}
                       disabled={product.stock === 0}
                       className="flex-1 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition text-sm font-medium disabled:bg-gray-400"
                     >
                       {product.stock === 0 ? 'Stok Habis' : 'Beli'}
-                    </button>
+                    </button> */}
                   </div>
                 </div>
               </div>

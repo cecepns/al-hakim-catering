@@ -230,7 +230,7 @@ const AppRoutes = () => {
       <Route
         path="/pembeli/checkout"
         element={
-          <ProtectedRoute allowedRoles={['pembeli']}>
+          <ProtectedRoute allowedRoles={['pembeli', 'admin', 'marketing']}>
             <PembeliCheckout />
           </ProtectedRoute>
         }
