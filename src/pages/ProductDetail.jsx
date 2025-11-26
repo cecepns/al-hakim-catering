@@ -63,8 +63,9 @@ const ProductDetail = () => {
       return;
     }
 
-    if (user.role !== "pembeli") {
-      toast.error("Hanya pembeli yang dapat menambahkan produk ke keranjang");
+    const allowedRoles = ["pembeli", "admin", "marketing"];
+    if (!allowedRoles.includes(user.role)) {
+      toast.error("Anda tidak memiliki akses untuk melakukan pembelian");
       return;
     }
 
@@ -99,8 +100,9 @@ const ProductDetail = () => {
       return;
     }
 
-    if (user.role !== "pembeli") {
-      toast.error("Hanya pembeli yang dapat melakukan pembelian");
+    const allowedRoles = ["pembeli", "admin", "marketing"];
+    if (!allowedRoles.includes(user.role)) {
+      toast.error("Anda tidak memiliki akses untuk melakukan pembelian");
       return;
     }
 
