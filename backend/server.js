@@ -1349,11 +1349,11 @@ app.delete('/api/products/:id/images/:imageId', authenticateToken, authorizeRole
 // ========================================
 app.post('/api/products/:id/variations', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
-    const { name, price_adjustment, stock } = req.body;
+    const { name, price_adjustment, stock, description } = req.body;
 
     const [result] = await pool.query(
-      'INSERT INTO product_variants (product_id, name, price_adjustment, stock) VALUES (?, ?, ?, ?)',
-      [req.params.id, name, price_adjustment || 0, stock || 0]
+      'INSERT INTO product_variants (product_id, name, price_adjustment, stock, description) VALUES (?, ?, ?, ?, ?)',
+      [req.params.id, name, price_adjustment || 0, stock || 0, description || null]
     );
 
     res.status(201).json({ message: 'Variasi berhasil ditambahkan', id: result.insertId });

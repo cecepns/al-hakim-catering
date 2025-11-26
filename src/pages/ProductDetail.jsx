@@ -380,7 +380,7 @@ const ProductDetail = () => {
                           <div className="text-right">
                             {variation.price_adjustment > 0 && (
                               <p className="text-sm font-medium text-primary-600">
-                                +Rp {formatRupiah(variation.price_adjustment)}
+                                Rp {formatRupiah(variation.price_adjustment)}
                               </p>
                             )}
                             <p className="text-xs text-gray-500">
