@@ -1115,16 +1115,42 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       );
 
       if (existingIncome.length === 0) {
-        await pool.query(
-          'INSERT INTO cash_flow_transactions (type, amount, description, order_id, created_by) VALUES (?, ?, ?, ?, ?)',
-          [
-            'income',
-            orderAmount,
-            `Pemasukan dari pesanan #${req.params.id}`,
-            req.params.id,
-            req.user.id
-          ]
-        );
+        const connection = await pool.getConnection();
+        try {
+          await connection.beginTransaction();
+
+          // Create income transaction with activity_category = 'operasi'
+          const [result] = await connection.query(
+            'INSERT INTO cash_flow_transactions (type, activity_category, amount, description, order_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+            [
+              'income',
+              'operasi',
+              orderAmount,
+              `Pemasukan dari pesanan #${req.params.id}`,
+              req.params.id,
+              req.user.id
+            ]
+          );
+
+          // Log creation in edit history
+          await connection.query(
+            `INSERT INTO cash_flow_edit_history 
+             (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, change_type) 
+             VALUES (?, ?, ?, ?, ?, ?, 'created')`,
+            [
+              result.insertId, req.user.id,
+              'income', orderAmount,
+              `Pemasukan dari pesanan #${req.params.id}`, 'operasi'
+            ]
+          );
+
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback();
+          console.error('Error creating cash flow transaction for order:', error);
+        } finally {
+          connection.release();
+        }
       }
     }
 
@@ -2823,7 +2849,7 @@ app.get('/', (req, res) => {
 // CASH FLOW ENDPOINTS
 // ========================================
 
-// Get cash flow summary (balance, income, expenses)
+// Get cash flow summary (balance, income, expenses) with activity categories
 app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
@@ -2832,31 +2858,52 @@ app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), asy
     const params = [];
     
     if (start_date && end_date) {
-      dateFilter = 'WHERE DATE(created_at) BETWEEN ? AND ?';
+      dateFilter = 'AND DATE(created_at) BETWEEN ? AND ?';
       params.push(start_date, end_date);
     }
 
-    // Get total income
-    const incomeQuery = dateFilter
-      ? `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'income' AND DATE(created_at) BETWEEN ? AND ?`
-      : `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'income'`;
-    const [incomeResult] = await pool.query(incomeQuery, params);
-    const totalIncome = parseFloat(incomeResult[0].total);
+    // Get overall balance
+    const balanceQuery = `SELECT 
+          COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) - 
+          COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as balance
+         FROM cash_flow_transactions 
+         WHERE 1=1 ${dateFilter}`;
+    const [balanceResult] = await pool.query(balanceQuery, params);
+    const balance = parseFloat(balanceResult[0].balance || 0);
 
-    // Get total expenses
-    const expenseQuery = dateFilter
-      ? `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'expense' AND DATE(created_at) BETWEEN ? AND ?`
-      : `SELECT COALESCE(SUM(amount), 0) as total FROM cash_flow_transactions WHERE type = 'expense'`;
-    const [expenseResult] = await pool.query(expenseQuery, params);
-    const totalExpenses = parseFloat(expenseResult[0].total);
+    // Get summary by activity category
+    const categories = ['operasi', 'investasi', 'pendanaan'];
+    const summaryByCategory = {};
 
-    // Calculate balance
-    const balance = totalIncome - totalExpenses;
+    for (const category of categories) {
+      const categoryParams = [...params];
+      const incomeQuery = `SELECT COALESCE(SUM(amount), 0) as total 
+           FROM cash_flow_transactions 
+           WHERE type = 'income' AND activity_category = ? ${dateFilter}`;
+      
+      const expenseQuery = `SELECT COALESCE(SUM(amount), 0) as total 
+           FROM cash_flow_transactions 
+           WHERE type = 'expense' AND activity_category = ? ${dateFilter}`;
+
+      const [incomeResult] = await pool.query(incomeQuery, [category, ...categoryParams]);
+      const [expenseResult] = await pool.query(expenseQuery, [category, ...categoryParams]);
+
+      const totalIncome = parseFloat(incomeResult[0].total || 0);
+      const totalExpenses = parseFloat(expenseResult[0].total || 0);
+      const totalCash = totalIncome - totalExpenses;
+
+      summaryByCategory[category] = {
+        totalIncome,
+        totalExpenses,
+        totalCash
+      };
+    }
 
     res.json({
       balance,
-      totalIncome,
-      totalExpenses
+      operasi: summaryByCategory.operasi,
+      investasi: summaryByCategory.investasi,
+      pendanaan: summaryByCategory.pendanaan
     });
   } catch (error) {
     console.error('Get cash flow summary error:', error);
@@ -2864,10 +2911,311 @@ app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), asy
   }
 });
 
-// Get all cash flow transactions
+// Get all cash flow transactions with pagination and filters
 app.get('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
-    const { type, start_date, end_date, limit = 100, offset = 0 } = req.query;
+    const { type, activity_category, start_date, end_date, limit = 10, offset = 0 } = req.query;
+    
+    let query = `
+      SELECT cft.*, 
+             u.name as created_by_name,
+             o.id as order_id_ref
+      FROM cash_flow_transactions cft
+      LEFT JOIN users u ON cft.created_by = u.id
+      LEFT JOIN orders o ON cft.order_id = o.id
+      WHERE 1=1
+    `;
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM cash_flow_transactions cft
+      WHERE 1=1
+    `;
+    const params = [];
+    const countParams = [];
+
+    if (type) {
+      query += ' AND cft.type = ?';
+      countQuery += ' AND cft.type = ?';
+      params.push(type);
+      countParams.push(type);
+    }
+
+    if (activity_category) {
+      query += ' AND cft.activity_category = ?';
+      countQuery += ' AND cft.activity_category = ?';
+      params.push(activity_category);
+      countParams.push(activity_category);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND DATE(cft.created_at) BETWEEN ? AND ?';
+      countQuery += ' AND DATE(cft.created_at) BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    // Get total count
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY cft.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [transactions] = await pool.query(query, params);
+
+    res.json({
+      transactions,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get cash flow transactions error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Create cash flow transaction (income or expense)
+app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { type, amount, description, activity_category } = req.body;
+
+    if (!type || !amount) {
+      return res.status(400).json({ message: 'Type dan amount harus diisi' });
+    }
+
+    if (type !== 'income' && type !== 'expense') {
+      return res.status(400).json({ message: 'Type harus income atau expense' });
+    }
+
+    const validCategories = ['operasi', 'investasi', 'pendanaan'];
+    const category = activity_category && validCategories.includes(activity_category) 
+      ? activity_category 
+      : 'operasi';
+
+    let proof_image_url = null;
+    if (req.file) {
+      proof_image_url = `/uploads/${req.file.filename}`;
+    }
+
+    const [result] = await connection.query(
+      'INSERT INTO cash_flow_transactions (type, activity_category, amount, description, proof_image_url, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [type, category, parseFloat(amount), description || null, proof_image_url, req.user.id]
+    );
+
+    const transactionId = result.insertId;
+
+    // Log creation in edit history
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, 'created')`,
+      [transactionId, req.user.id, type, parseFloat(amount), description || null, category]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Transaksi berhasil ditambahkan',
+      id: transactionId
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Update cash flow transaction
+app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { type, amount, description, activity_category } = req.body;
+    const transactionId = req.params.id;
+
+    // Get current transaction data for history
+    const [currentTransactions] = await connection.query(
+      'SELECT type, amount, description, activity_category FROM cash_flow_transactions WHERE id = ?',
+      [transactionId]
+    );
+    if (currentTransactions.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
+    }
+
+    const current = currentTransactions[0];
+
+    let proof_image_url = null;
+    if (req.file) {
+      proof_image_url = `/uploads/${req.file.filename}`;
+    }
+
+    const updateFields = [];
+    const updateParams = [];
+    const historyChanges = {
+      old_type: current.type,
+      new_type: current.type,
+      old_amount: current.amount,
+      new_amount: current.amount,
+      old_description: current.description,
+      new_description: current.description,
+      old_activity_category: current.activity_category,
+      new_activity_category: current.activity_category
+    };
+
+    if (type && type !== current.type) {
+      updateFields.push('type = ?');
+      updateParams.push(type);
+      historyChanges.new_type = type;
+    }
+    if (amount && parseFloat(amount) !== parseFloat(current.amount)) {
+      updateFields.push('amount = ?');
+      updateParams.push(parseFloat(amount));
+      historyChanges.new_amount = parseFloat(amount);
+    }
+    if (description !== undefined && description !== current.description) {
+      updateFields.push('description = ?');
+      updateParams.push(description);
+      historyChanges.new_description = description;
+    }
+    if (activity_category && activity_category !== current.activity_category) {
+      const validCategories = ['operasi', 'investasi', 'pendanaan'];
+      if (validCategories.includes(activity_category)) {
+        updateFields.push('activity_category = ?');
+        updateParams.push(activity_category);
+        historyChanges.new_activity_category = activity_category;
+      }
+    }
+    if (proof_image_url) {
+      updateFields.push('proof_image_url = ?');
+      updateParams.push(proof_image_url);
+    }
+
+    if (updateFields.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
+    }
+
+    updateParams.push(transactionId);
+    await connection.query(
+      `UPDATE cash_flow_transactions SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateParams
+    );
+
+    // Log edit in history
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, old_type, new_type, old_amount, new_amount, 
+        old_description, new_description, old_activity_category, new_activity_category, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'updated')`,
+      [
+        transactionId, req.user.id,
+        historyChanges.old_type, historyChanges.new_type,
+        historyChanges.old_amount, historyChanges.new_amount,
+        historyChanges.old_description, historyChanges.new_description,
+        historyChanges.old_activity_category, historyChanges.new_activity_category
+      ]
+    );
+
+    await connection.commit();
+
+    res.json({ message: 'Transaksi berhasil diupdate' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Delete cash flow transaction
+app.delete('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const transactionId = req.params.id;
+
+    // Get transaction data for history before deletion
+    const [transactions] = await connection.query(
+      'SELECT id, type, amount, description, activity_category, proof_image_url FROM cash_flow_transactions WHERE id = ?',
+      [transactionId]
+    );
+    if (transactions.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
+    }
+
+    const transaction = transactions[0];
+
+    // Log deletion in history
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, old_type, old_amount, old_description, old_activity_category, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, 'deleted')`,
+      [
+        transactionId, req.user.id,
+        transaction.type, transaction.amount,
+        transaction.description, transaction.activity_category
+      ]
+    );
+
+    // Delete proof image if exists
+    if (transaction.proof_image_url) {
+      const filePath = path.join(__dirname, transaction.proof_image_url.replace(/^\//, ''));
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    await connection.query('DELETE FROM cash_flow_transactions WHERE id = ?', [transactionId]);
+
+    await connection.commit();
+
+    res.json({ message: 'Transaksi berhasil dihapus' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete cash flow transaction error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Get edit history for a transaction
+app.get('/api/cash-flow/transactions/:id/history', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const [history] = await pool.query(
+      `SELECT h.*, u.name as changed_by_name
+       FROM cash_flow_edit_history h
+       LEFT JOIN users u ON h.changed_by = u.id
+       WHERE h.transaction_id = ?
+       ORDER BY h.created_at DESC`,
+      [req.params.id]
+    );
+
+    res.json(history);
+  } catch (error) {
+    console.error('Get cash flow edit history error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Export cash flow to Excel
+app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { type, activity_category, start_date, end_date } = req.query;
     
     let query = `
       SELECT cft.*, 
@@ -2885,135 +3233,69 @@ app.get('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin')
       params.push(type);
     }
 
+    if (activity_category) {
+      query += ' AND cft.activity_category = ?';
+      params.push(activity_category);
+    }
+
     if (start_date && end_date) {
       query += ' AND DATE(cft.created_at) BETWEEN ? AND ?';
       params.push(start_date, end_date);
     }
 
-    query += ' ORDER BY cft.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
+    query += ' ORDER BY cft.created_at DESC';
 
     const [transactions] = await pool.query(query, params);
 
-    res.json(transactions);
-  } catch (error) {
-    console.error('Get cash flow transactions error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan' });
-  }
-});
+    const escapeCsv = (value) => {
+      if (value === null || value === undefined) return '';
+      const str = String(value).replace(/"/g, '""');
+      return /[",\n]/.test(str) ? `"${str}"` : str;
+    };
 
-// Create cash flow transaction (income or expense)
-app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
-  try {
-    const { type, amount, description } = req.body;
+    const activityCategoryMap = {
+      'operasi': 'Aktivitas Operasi',
+      'investasi': 'Aktivitas Investasi',
+      'pendanaan': 'Aktivitas Pendanaan'
+    };
 
-    if (!type || !amount) {
-      return res.status(400).json({ message: 'Type dan amount harus diisi' });
-    }
+    const typeMap = {
+      'income': 'Pemasukan',
+      'expense': 'Pengeluaran'
+    };
 
-    if (type !== 'income' && type !== 'expense') {
-      return res.status(400).json({ message: 'Type harus income atau expense' });
-    }
+    const header = [
+      'Tanggal',
+      'Kategori Aktivitas',
+      'Tipe',
+      'Jumlah',
+      'Keterangan',
+      'Dibuat Oleh',
+      'Pesanan #'
+    ];
 
-    let proof_image_url = null;
-    if (req.file) {
-      proof_image_url = `/uploads/${req.file.filename}`;
-    }
+    const csvRows = [header.join(',')];
 
-    const [result] = await pool.query(
-      'INSERT INTO cash_flow_transactions (type, amount, description, proof_image_url, created_by) VALUES (?, ?, ?, ?, ?)',
-      [type, parseFloat(amount), description || null, proof_image_url, req.user.id]
-    );
-
-    res.status(201).json({
-      message: 'Transaksi berhasil ditambahkan',
-      id: result.insertId
+    transactions.forEach((row) => {
+      csvRows.push([
+        escapeCsv(new Date(row.created_at).toLocaleString('id-ID')),
+        escapeCsv(activityCategoryMap[row.activity_category] || row.activity_category),
+        escapeCsv(typeMap[row.type] || row.type),
+        escapeCsv(row.type === 'income' ? row.amount : -row.amount),
+        escapeCsv(row.description || '-'),
+        escapeCsv(row.created_by_name || '-'),
+        escapeCsv(row.order_id_ref || '-')
+      ].join(','));
     });
+
+    const filename = `laporan-arus-kas-${start_date || 'all'}-sd-${end_date || 'all'}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\ufeff' + csvRows.join('\n')); // BOM for Excel UTF-8 support
   } catch (error) {
-    console.error('Create cash flow transaction error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan' });
-  }
-});
-
-// Update cash flow transaction
-app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
-  try {
-    const { type, amount, description } = req.body;
-    const transactionId = req.params.id;
-
-    // Check if transaction exists
-    const [transactions] = await pool.query('SELECT id FROM cash_flow_transactions WHERE id = ?', [transactionId]);
-    if (transactions.length === 0) {
-      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
-    }
-
-    let proof_image_url = null;
-    if (req.file) {
-      proof_image_url = `/uploads/${req.file.filename}`;
-    }
-
-    const updateFields = [];
-    const updateParams = [];
-
-    if (type) {
-      updateFields.push('type = ?');
-      updateParams.push(type);
-    }
-    if (amount) {
-      updateFields.push('amount = ?');
-      updateParams.push(parseFloat(amount));
-    }
-    if (description !== undefined) {
-      updateFields.push('description = ?');
-      updateParams.push(description);
-    }
-    if (proof_image_url) {
-      updateFields.push('proof_image_url = ?');
-      updateParams.push(proof_image_url);
-    }
-
-    if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
-    }
-
-    updateParams.push(transactionId);
-    await pool.query(
-      `UPDATE cash_flow_transactions SET ${updateFields.join(', ')} WHERE id = ?`,
-      updateParams
-    );
-
-    res.json({ message: 'Transaksi berhasil diupdate' });
-  } catch (error) {
-    console.error('Update cash flow transaction error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan' });
-  }
-});
-
-// Delete cash flow transaction
-app.delete('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
-  try {
-    const transactionId = req.params.id;
-
-    // Check if transaction exists
-    const [transactions] = await pool.query('SELECT id, proof_image_url FROM cash_flow_transactions WHERE id = ?', [transactionId]);
-    if (transactions.length === 0) {
-      return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
-    }
-
-    // Delete proof image if exists
-    if (transactions[0].proof_image_url) {
-      const filePath = path.join(__dirname, transactions[0].proof_image_url.replace(/^\//, ''));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    }
-
-    await pool.query('DELETE FROM cash_flow_transactions WHERE id = ?', [transactionId]);
-
-    res.json({ message: 'Transaksi berhasil dihapus' });
-  } catch (error) {
-    console.error('Delete cash flow transaction error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan' });
+    console.error('Export cash flow error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mengekspor laporan' });
   }
 });
 

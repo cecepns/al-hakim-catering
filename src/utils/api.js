@@ -182,6 +182,11 @@ export const cashFlowAPI = {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   deleteTransaction: (id) => api.delete(`/cash-flow/transactions/${id}`),
+  getEditHistory: (id) => api.get(`/cash-flow/transactions/${id}/history`),
+  exportExcel: (params) => api.get('/cash-flow/export', {
+    params,
+    responseType: 'blob',
+  }),
 };
 
 export const companySettingsAPI = {
