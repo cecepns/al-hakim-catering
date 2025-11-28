@@ -1815,9 +1815,12 @@ app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing')
   try {
     const [result] = await pool.query(
       `SELECT
+        -- Saldo yang bisa ditarik: hanya komisi dengan status 'completed'
         SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as balance,
-        SUM(CASE WHEN status = 'completed' AND MONTH(created_at) = MONTH(NOW()) THEN commission_amount ELSE 0 END) as thisMonth,
-        SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as totalEarned
+        -- Komisi bulan ini (semua status, agar lebih merefleksikan performa bulan berjalan)
+        SUM(CASE WHEN MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW()) THEN commission_amount ELSE 0 END) as thisMonth,
+        -- Total komisi sepanjang waktu (semua status)
+        SUM(commission_amount) as totalEarned
        FROM commissions
        WHERE marketing_id = ?`,
       [req.user.id]
@@ -1836,9 +1839,33 @@ app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing')
 
 app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, page = 1, limit = 10 } = req.query;
 
-    let query = `
+    const pageInt = parseInt(page, 10) || 1;
+    const limitInt = parseInt(limit, 10) || 10;
+    const offset = (pageInt - 1) * limitInt;
+
+    // Base WHERE params (shared between count & data queries)
+    const baseParams = [req.user.id];
+    const whereStatusClause = (status && status !== 'all') ? ' AND c.status = ?' : '';
+    if (status && status !== 'all') {
+      baseParams.push(status);
+    }
+
+    // Get total count of distinct orders for this marketing (with optional status filter)
+    const countQuery = `
+      SELECT COUNT(DISTINCT o.id) as total
+      FROM orders o
+      LEFT JOIN commissions c ON o.id = c.order_id
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN products p ON oi.product_id = p.id
+      WHERE o.marketing_id = ?${whereStatusClause}
+    `;
+    const [countRows] = await pool.query(countQuery, baseParams);
+    const total = countRows[0]?.total || 0;
+
+    // Now fetch paginated data
+    let dataQuery = `
       SELECT 
         o.*, 
         c.commission_amount, 
@@ -1851,24 +1878,28 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
       FROM orders o
       LEFT JOIN commissions c ON o.id = c.order_id
       LEFT JOIN order_items oi ON o.id = oi.order_id
-      LEFT JOIn products p ON oi.product_id = p.id
-      WHERE o.marketing_id = ?
+      LEFT JOIN products p ON oi.product_id = p.id
+      WHERE o.marketing_id = ?${whereStatusClause}
     `;
-    const params = [req.user.id];
-
-    if (status && status !== 'all') {
-      query += ' AND c.status = ?';
-      params.push(status);
-    }
 
     // Group by order id because we use aggregation (GROUP_CONCAT)
-    query += ' GROUP BY o.id';
+    dataQuery += ' GROUP BY o.id';
 
-    query += ' ORDER BY o.created_at DESC';
+    dataQuery += ' ORDER BY o.created_at DESC';
+    dataQuery += ' LIMIT ? OFFSET ?';
 
-    const [orders] = await pool.query(query, params);
+    const dataParams = [...baseParams, limitInt, offset];
+    const [orders] = await pool.query(dataQuery, dataParams);
 
-    res.json(orders);
+    res.json({
+      data: orders,
+      pagination: {
+        total,
+        page: pageInt,
+        limit: limitInt,
+        totalPages: limitInt > 0 ? Math.max(1, Math.ceil(total / limitInt)) : 1
+      }
+    });
   } catch (error) {
     console.error('Get commission orders error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });

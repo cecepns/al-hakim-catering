@@ -10,7 +10,6 @@ const MarketingDashboard = () => {
     thisMonth: 0,
     totalEarned: 0,
   });
-  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -20,26 +19,13 @@ const MarketingDashboard = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [balanceRes, ordersRes] = await Promise.all([
-        commissionAPI.getBalance(),
-        commissionAPI.getOrders(),
-      ]);
+      const balanceRes = await commissionAPI.getBalance();
       setCommission(balanceRes.data);
-      setOrders(ordersRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'pending': 'bg-yellow-100 text-yellow-800',
-      'completed': 'bg-green-100 text-green-800',
-      'cancelled': 'bg-red-100 text-red-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
   if (loading) {
@@ -143,80 +129,6 @@ const MarketingDashboard = () => {
               </div>
             </div>
           </Link>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4 md:mb-6">
-            <h2 className="text-lg md:text-xl font-bold text-gray-900">Penjualan Terbaru</h2>
-            <Link to="/marketing/orders" className="text-primary-600 hover:text-primary-700 font-semibold text-sm">
-              Lihat Semua
-            </Link>
-          </div>
-
-          {orders.length === 0 ? (
-            <div className="text-center py-12">
-              <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              <p className="text-gray-600 mb-4">Belum ada penjualan</p>
-              <Link to="/products" className="inline-block bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700 transition">
-                Mulai Berjualan
-              </Link>
-            </div>
-          ) : (
-            <div className="overflow-x-auto -mx-4 md:mx-0 md:rounded-lg">
-              <table className="w-full min-w-max md:min-w-full">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      ID Pesanan
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Tanggal
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap hidden md:table-cell">
-                      Produk
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Total
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Komisi
-                    </th>
-                    <th className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-3 md:px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
-                        #{order.id}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {new Date(order.created_at).toLocaleDateString('id-ID')}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 hidden md:table-cell max-w-xs truncate">
-                        {order.product_name}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm text-gray-900 whitespace-nowrap">
-                        Rp {formatRupiah(order.total_amount)}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 text-sm font-semibold text-green-600 whitespace-nowrap">
-                        Rp {formatRupiah(order.commission)}
-                      </td>
-                      <td className="px-3 md:px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 md:px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
-                          {order.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
 
         <div className="mt-8 bg-primary-50 border-l-4 border-primary-500 p-6 rounded-lg">

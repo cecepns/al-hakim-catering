@@ -13,23 +13,64 @@ const MarketingOrders = () => {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [savingNotesId, setSavingNotesId] = useState(null);
   const [notesDrafts, setNotesDrafts] = useState({});
+  const [commissionStats, setCommissionStats] = useState({
+    balance: 0,
+    thisMonth: 0,
+    totalEarned: 0,
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    totalPages: 1,
+  });
+
+  const ITEMS_PER_PAGE = 10;
 
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
-      const params = filter !== 'all' ? { status: filter } : {};
+      const params = {
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+      };
+
+      if (filter !== 'all') {
+        params.status = filter;
+      }
+
       const response = await commissionAPI.getOrders(params);
-      setOrders(response.data);
+      setOrders(response.data.data || []);
+      setPagination(response.data.pagination || {
+        total: 0,
+        page: 1,
+        limit: ITEMS_PER_PAGE,
+        totalPages: 1,
+      });
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, currentPage]);
+
+  const fetchCommissionStats = useCallback(async () => {
+    try {
+      const response = await commissionAPI.getBalance();
+      setCommissionStats(response.data);
+    } catch (error) {
+      console.error('Error fetching commission stats:', error);
+    }
+  }, []);
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    fetchCommissionStats();
+  }, [fetchCommissionStats]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -47,10 +88,7 @@ const MarketingOrders = () => {
     { value: 'cancelled', label: 'Dibatalkan' },
   ];
 
-  const totalCommission = orders.reduce(
-    (sum, order) => sum + (order.commission_amount || 0),
-    0
-  );
+  const totalCommission = commissionStats.totalEarned || 0;
 
   const handleNotesChange = (orderId, value) => {
     setNotesDrafts((prev) => ({
@@ -95,7 +133,7 @@ const MarketingOrders = () => {
           <div className="bg-white rounded-xl shadow-lg p-6">
             <p className="text-sm text-gray-600">Pesanan Selesai</p>
             <p className="text-3xl font-bold text-green-600 mt-2">
-              {orders.filter((o) => o.status === 'completed').length}
+              {orders.filter((o) => o.status === 'selesai').length}
             </p>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-6">
@@ -111,7 +149,10 @@ const MarketingOrders = () => {
             {statuses.map((status) => (
               <button
                 key={status.value}
-                onClick={() => setFilter(status.value)}
+                onClick={() => {
+                  setFilter(status.value);
+                  setCurrentPage(1);
+                }}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
                   filter === status.value
                     ? 'bg-primary-600 text-white'
@@ -194,7 +235,9 @@ const MarketingOrders = () => {
                   {orders.map((order) => {
                     const sisaPembayaran =
                       (order.final_amount || 0) - (order.payment_amount || 0);
-                    const status = order.commission_status || 'pending';
+                    // Status yang ditampilkan di tabel ini adalah status pesanan,
+                    // bukan status komisi marketing.
+                    const status = order.status || 'pending';
                     const draftNotes =
                       notesDrafts[order.id] !== undefined
                         ? notesDrafts[order.id]
@@ -282,6 +325,40 @@ const MarketingOrders = () => {
                   })}
                 </tbody>
               </table>
+              {/* Pagination */}
+              {pagination.totalPages > 1 && (
+                <div className="mt-6 flex items-center justify-between">
+                  <div className="text-sm text-gray-700">
+                    Menampilkan {((pagination.page - 1) * pagination.limit) + 1} -{' '}
+                    {Math.min(pagination.page * pagination.limit, pagination.total)} dari {pagination.total} pesanan
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(1, prev - 1))
+                      }
+                      disabled={pagination.page === 1}
+                      className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Sebelumnya
+                    </button>
+                    <span className="px-4 py-2 text-gray-700">
+                      Halaman {pagination.page} dari {pagination.totalPages}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setCurrentPage((prev) =>
+                          Math.min(pagination.totalPages, prev + 1)
+                        )
+                      }
+                      disabled={pagination.page === pagination.totalPages}
+                      className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Selanjutnya
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
