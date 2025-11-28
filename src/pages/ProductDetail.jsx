@@ -90,24 +90,15 @@ const ProductDetail = () => {
   };
 
   const handleBuyNow = async () => {
-    if (!user) {
-      toast.warning(
-        "Silakan login terlebih dahulu untuk melakukan pembelian",
-        {
-          position: "top-center",
-          autoClose: 2000,
-        }
-      );
-      setTimeout(() => {
-        navigate("/login");
-      }, 2000);
-      return;
-    }
+    const isGuest = !user;
 
-    const allowedRoles = ["pembeli", "admin", "marketing"];
-    if (!allowedRoles.includes(user.role)) {
-      toast.error("Anda tidak memiliki akses untuk melakukan pembelian");
-      return;
+    // Jika sudah login, batasi role yang boleh melakukan pembelian
+    if (!isGuest) {
+      const allowedRoles = ["pembeli", "admin", "marketing"];
+      if (!allowedRoles.includes(user.role)) {
+        toast.error("Anda tidak memiliki akses untuk melakukan pembelian");
+        return;
+      }
     }
 
     try {

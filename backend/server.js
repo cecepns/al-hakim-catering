@@ -387,7 +387,7 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         CASE 
           WHEN JSON_VALID(o.delivery_notes) THEN JSON_UNQUOTE(JSON_EXTRACT(o.delivery_notes, '$.admin_notes'))
           ELSE NULL
-        END as admin_notes
+        END as admin_notes,
         (SELECT u2.email 
          FROM order_status_logs osl
          JOIN users u2 ON osl.handler_id = u2.id
@@ -798,16 +798,30 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
 
       const product = products[0];
+
+      // Safely parse numeric fields from database to avoid NaN issues
+      const rawPrice = product.discounted_price != null && product.discounted_price !== ''
+        ? product.discounted_price
+        : product.price;
+      let price = Number(rawPrice);
+
+      if (!Number.isFinite(price)) {
+        throw new Error(`Harga produk "${product.name}" tidak valid`);
+      }
+
       const productCashbackPercentage = product.cashback_percentage !== undefined && product.cashback_percentage !== null
-        ? parseFloat(product.cashback_percentage)
+        ? Number(product.cashback_percentage)
         : 1;
+
+      if (!Number.isFinite(productCashbackPercentage)) {
+        throw new Error(`Persentase cashback untuk produk "${product.name}" tidak valid`);
+      }
 
       // Validate stock availability
       if (product.stock < item.quantity) {
         throw new Error(`Stok produk "${product.name}" tidak mencukupi. Stok tersedia: ${product.stock}`);
       }
 
-      let price = product.discounted_price || product.price;
       let variant_name = null;
       
       // Add variant price adjustment if variant is selected
@@ -816,7 +830,11 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         if (variants.length === 0) {
           throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
-        price += variants[0].price_adjustment;
+        const adjustment = Number(variants[0].price_adjustment || 0);
+        if (!Number.isFinite(adjustment)) {
+          throw new Error(`Penyesuaian harga varian untuk produk "${product.name}" tidak valid`);
+        }
+        price += adjustment;
         variant_name = variants[0].name; // Get variant name from database
       }
       
@@ -888,6 +906,11 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
     }
     
     const final_amount = base_amount + margin_amount;
+
+    // Final validation to prevent NaN from being sent to the database
+    if (!Number.isFinite(total_amount) || !Number.isFinite(base_amount) || !Number.isFinite(final_amount)) {
+      throw new Error('Perhitungan total pesanan tidak valid (hasil bukan angka)');
+    }
     
     // Validate final_amount is not negative
     if (final_amount < 0) {

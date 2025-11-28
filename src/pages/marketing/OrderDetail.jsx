@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { formatRupiah } from '../../utils/formatHelper';
+import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 
 const MarketingOrderDetail = () => {
@@ -100,6 +100,38 @@ const MarketingOrderDetail = () => {
                 <div className="flex justify-between">
                   <span className="text-gray-600">Telepon:</span>
                   <span className="font-medium">{order.customer_phone}</span>
+                </div>
+
+                {/* Alamat & Detail Acara */}
+                <div className="pt-4 border-t space-y-2">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-1">
+                      Alamat & Detail Acara
+                    </h3>
+                    <p className="text-sm text-gray-700 whitespace-pre-line">
+                      {order.delivery_address}
+                    </p>
+                  </div>
+
+                  {order.delivery_notes && (() => {
+                    const notes = parseDeliveryNotes(order.delivery_notes, true);
+                    if (!notes) return null;
+
+                    return (
+                      <div className="mt-2 text-xs text-gray-700 bg-gray-50 rounded-lg p-3 space-y-1">
+                        <p className="font-medium text-gray-800 mb-1">
+                          Detail Acara & Pengiriman:
+                        </p>
+                        {Array.isArray(notes) ? (
+                          notes.map((line, idx) => (
+                            <p key={idx}>{line}</p>
+                          ))
+                        ) : (
+                          <p>{notes}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

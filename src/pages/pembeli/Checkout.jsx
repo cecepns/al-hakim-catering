@@ -220,10 +220,26 @@ const Checkout = () => {
         margin_amount: user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0,
       };
 
-      // For logged-in users, use FormData if payment_proof exists, otherwise JSON
       const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
-      
-      if (formData.payment_proof) {
+
+      // Guest checkout: kirim ke endpoint khusus guest menggunakan FormData
+      if (!user) {
+        const formDataToSend = new FormData();
+        formDataToSend.append('items', JSON.stringify(items));
+        formDataToSend.append('voucher_code', voucher?.code || '');
+        formDataToSend.append('cashback_used', cashbackUsed.toString());
+        formDataToSend.append('payment_method', formData.payment_method);
+        formDataToSend.append('payment_amount', formData.payment_amount || '');
+        formDataToSend.append('delivery_address', formData.delivery_address || '-');
+        formDataToSend.append('delivery_notes', JSON.stringify(deliveryNotesData));
+        formDataToSend.append('margin_amount', marginAmount.toString());
+        if (formData.payment_proof) {
+          formDataToSend.append('payment_proof', formData.payment_proof);
+        }
+
+        await orderAPI.createGuest(formDataToSend);
+      } else if (formData.payment_proof) {
+        // Logged-in user dengan bukti pembayaran: gunakan createWithProof
         const formDataToSend = new FormData();
         formDataToSend.append('items', JSON.stringify(items));
         formDataToSend.append('voucher_code', voucher?.code || '');
@@ -235,9 +251,9 @@ const Checkout = () => {
         formDataToSend.append('margin_amount', marginAmount.toString());
         formDataToSend.append('payment_proof', formData.payment_proof);
         
-        // Use createWithProof if available, otherwise use uploadProof after create
         await orderAPI.createWithProof(formDataToSend);
       } else {
+        // Logged-in user tanpa bukti pembayaran: gunakan JSON biasa
         const orderData = {
           items,
           voucher_code: voucher?.code || null,
