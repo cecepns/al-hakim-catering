@@ -224,7 +224,7 @@ const AdminCommissionWithdrawals = () => {
         {/* Status Update Modal */}
         {statusModal && selectedWithdrawal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
               {(() => {
                 const isCompleted = selectedWithdrawal.status === 'completed';
                 return null;
@@ -290,11 +290,11 @@ const AdminCommissionWithdrawals = () => {
                       <p className="text-xs text-gray-500 mb-2">
                         Bukti saat ini sudah tersimpan. Upload baru akan menggantikan bukti lama.
                       </p>
-                      <div className="border rounded-lg overflow-hidden bg-gray-50 p-2">
+                      <div className="border rounded-lg overflow-hidden bg-gray-50 p-2 max-h-72">
                         <img
                           src={getImageUrl(selectedWithdrawal.proof_image_url)}
                           alt="Bukti transfer"
-                          className="max-h-60 mx-auto object-contain"
+                          className="max-h-64 mx-auto object-contain"
                         />
                       </div>
                     </div>
