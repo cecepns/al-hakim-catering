@@ -1797,9 +1797,12 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
         CASE 
           WHEN JSON_VALID(o.delivery_notes) THEN JSON_UNQUOTE(JSON_EXTRACT(o.delivery_notes, '$.admin_notes'))
           ELSE NULL
-        END as admin_notes
+        END as admin_notes,
+        GROUP_CONCAT(DISTINCT p.category ORDER BY p.category SEPARATOR ', ') as categories
       FROM orders o
       LEFT JOIN commissions c ON o.id = c.order_id
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIn products p ON oi.product_id = p.id
       WHERE o.marketing_id = ?
     `;
     const params = [req.user.id];
@@ -1808,6 +1811,9 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
       query += ' AND c.status = ?';
       params.push(status);
     }
+
+    // Group by order id because we use aggregation (GROUP_CONCAT)
+    query += ' GROUP BY o.id';
 
     query += ' ORDER BY o.created_at DESC';
 
