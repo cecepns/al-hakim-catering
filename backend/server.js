@@ -384,6 +384,10 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
         (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'dikirim') as tanggal_pengiriman,
         (SELECT MIN(created_at) FROM order_status_logs WHERE order_id = o.id AND status = 'selesai') as tanggal_selesai,
         (SELECT rating FROM reviews WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) as rating,
+        CASE 
+          WHEN JSON_VALID(o.delivery_notes) THEN JSON_UNQUOTE(JSON_EXTRACT(o.delivery_notes, '$.admin_notes'))
+          ELSE NULL
+        END as admin_notes
         (SELECT u2.email 
          FROM order_status_logs osl
          JOIN users u2 ON osl.handler_id = u2.id
@@ -449,9 +453,12 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
       `SELECT o.*, 
         COALESCE(o.guest_customer_name, u.name) as customer_name, 
         u.email as customer_email, 
-        COALESCE(o.guest_wa_number_1, u.phone) as customer_phone
+        COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+        c.commission_amount,
+        c.status as commission_status
        FROM orders o
        JOIN users u ON o.user_id = u.id
+       LEFT JOIN commissions c ON o.id = c.order_id
        WHERE o.id = ?`,
       [req.params.id]
     );
@@ -991,12 +998,29 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     // Create commission record if user is marketing
     if (marketing_id) {
-      // Get commission_percentage from user
-      const [users] = await connection.query('SELECT commission_percentage FROM users WHERE id = ?', [marketing_id]);
-      const commission_percentage = users.length > 0 && users[0].commission_percentage ? parseFloat(users[0].commission_percentage) : 0;
-      
-      // Calculate commission: (base_amount * commission_percentage / 100) + margin_amount
-      const admin_commission = (base_amount * commission_percentage) / 100;
+      // Calculate admin commission based on product-level commission_percentage
+      const [commissionRows] = await connection.query(
+        `SELECT 
+           SUM(oi.subtotal * (COALESCE(p.commission_percentage, 0) / 100)) AS admin_commission,
+           SUM(oi.subtotal) AS items_base_amount
+         FROM order_items oi
+         JOIN products p ON oi.product_id = p.id
+         WHERE oi.order_id = ?`,
+        [orderId]
+      );
+
+      const admin_commission = commissionRows[0]?.admin_commission
+        ? parseFloat(commissionRows[0].admin_commission)
+        : 0;
+
+      const effective_base_amount = commissionRows[0]?.items_base_amount
+        ? parseFloat(commissionRows[0].items_base_amount)
+        : base_amount;
+
+      const commission_percentage =
+        effective_base_amount > 0 ? (admin_commission / effective_base_amount) * 100 : 0;
+
+      // Total commission = admin commission (from products) + margin_amount
       const commission_amount = admin_commission + margin_amount;
 
       await connection.query(
@@ -1763,14 +1787,31 @@ app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing')
 
 app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
-    const [orders] = await pool.query(
-      `SELECT o.*, c.commission_amount, c.status as commission_status
-       FROM orders o
-       LEFT JOIN commissions c ON o.id = c.order_id
-       WHERE o.marketing_id = ?
-       ORDER BY o.created_at DESC`,
-      [req.user.id]
-    );
+    const { status } = req.query;
+
+    let query = `
+      SELECT 
+        o.*, 
+        c.commission_amount, 
+        c.status as commission_status,
+        CASE 
+          WHEN JSON_VALID(o.delivery_notes) THEN JSON_UNQUOTE(JSON_EXTRACT(o.delivery_notes, '$.admin_notes'))
+          ELSE NULL
+        END as admin_notes
+      FROM orders o
+      LEFT JOIN commissions c ON o.id = c.order_id
+      WHERE o.marketing_id = ?
+    `;
+    const params = [req.user.id];
+
+    if (status && status !== 'all') {
+      query += ' AND c.status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY o.created_at DESC';
+
+    const [orders] = await pool.query(query, params);
 
     res.json(orders);
   } catch (error) {
@@ -1977,6 +2018,65 @@ app.put('/api/admin/orders/:id/notes', authenticateToken, authorizeRole('admin')
     res.json({ message: 'Catatan berhasil diupdate' });
   } catch (error) {
     console.error('Update order notes error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Update admin notes on order (delivery_notes.admin_notes) - Marketing
+app.put('/api/marketing/orders/:id/notes', authenticateToken, authorizeRole('marketing'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+
+    // Check if order belongs to this marketing
+    const [orders] = await pool.query(
+      'SELECT id, delivery_notes FROM orders WHERE id = ? AND marketing_id = ?',
+      [id, req.user.id]
+    );
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan atau bukan milik Anda' });
+    }
+
+    const currentNotes = orders[0].delivery_notes;
+    let updatedNotes = notes || '';
+
+    // If current notes is JSON, preserve structure and only update admin_notes
+    if (currentNotes) {
+      try {
+        const parsedNotes = JSON.parse(currentNotes);
+
+        // Preserve customer notes
+        const customerNotes = parsedNotes.notes || '';
+        const kitchenNotes = parsedNotes.kitchen_notes || '';
+
+        parsedNotes.notes = customerNotes;
+        parsedNotes.kitchen_notes = kitchenNotes;
+        parsedNotes.admin_notes = notes || '';
+
+        updatedNotes = JSON.stringify(parsedNotes);
+      } catch {
+        // If not JSON, create structured notes keeping old text as customer notes
+        const customerNotes = currentNotes || '';
+        updatedNotes = JSON.stringify({
+          notes: customerNotes,
+          kitchen_notes: '',
+          admin_notes: notes || ''
+        });
+      }
+    } else {
+      // No existing notes, create new structure
+      updatedNotes = JSON.stringify({ notes: '', kitchen_notes: '', admin_notes: notes || '' });
+    }
+
+    await pool.query(
+      'UPDATE orders SET delivery_notes = ? WHERE id = ?',
+      [updatedNotes, id]
+    );
+
+    res.json({ message: 'Catatan untuk admin berhasil diupdate' });
+  } catch (error) {
+    console.error('Update marketing order admin notes error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });

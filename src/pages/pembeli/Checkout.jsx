@@ -149,12 +149,6 @@ const Checkout = () => {
     return Math.max(0, finalAmount);
   };
 
-  const getBaseAmount = () => {
-    const subtotal = getCurrentSubtotal();
-    const discount = calculateDiscount();
-    return subtotal - discount - cashbackUsed;
-  };
-
   const handleCashbackChange = (e) => {
     const amount = parseFloat(e.target.value) || 0;
     const subtotal = getCurrentSubtotal();
@@ -277,7 +271,6 @@ const Checkout = () => {
   const currentItems = getCurrentItems();
   const subtotal = getCurrentSubtotal();
   const discount = calculateDiscount();
-  const finalTotal = calculateTotal();
 
   if (!directCheckout && cart.length === 0) {
     return (
@@ -580,9 +573,6 @@ const Checkout = () => {
                     type="number"
                     value={cashbackUsed || ''}
                     onChange={handleCashbackChange}
-                    min="0"
-                    max={Math.min(cashbackBalance, subtotal - discount)}
-                    step="1000"
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                     placeholder="0"
                   />
@@ -605,8 +595,6 @@ const Checkout = () => {
                     type="number"
                     value={formData.margin_amount || ''}
                     onChange={(e) => handleInputChange('margin_amount', e.target.value)}
-                    min="0"
-                    step="1000"
                     className="w-full px-3 py-2 border rounded-lg text-sm"
                     placeholder="0"
                   />
@@ -657,8 +645,6 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal pembayaran"
-                          min="0"
-                          step="1000"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />
@@ -707,8 +693,6 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal transfer"
-                          min="0"
-                          step="1000"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />
@@ -771,8 +755,6 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal DP"
-                          min="0"
-                          step="1000"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />

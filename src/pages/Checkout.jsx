@@ -500,8 +500,6 @@ const Checkout = () => {
                     type="number"
                     value={formData.margin_amount || ''}
                     onChange={(e) => handleInputChange('margin_amount', e.target.value)}
-                    min="0"
-                    step="1000"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                     placeholder="0"
                   />
@@ -569,8 +567,6 @@ const Checkout = () => {
                             value={formData.payment_amount}
                             onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                             placeholder={`Masukkan nominal ${method.value === 'dp' ? 'DP' : method.value === 'transfer' ? 'transfer' : 'pembayaran'}`}
-                            min="0"
-                            step="1000"
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                             required={formData.payment_method === method.value}
                           />

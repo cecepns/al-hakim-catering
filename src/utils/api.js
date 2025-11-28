@@ -72,6 +72,7 @@ export const orderAPI = {
   }),
   updatePaymentStatus: (id, data) => api.put(`/admin/orders/${id}/payment-status`, data),
   updateNotes: (id, data) => api.put(`/admin/orders/${id}/notes`, data),
+  updateMarketingAdminNotes: (id, data) => api.put(`/marketing/orders/${id}/notes`, data),
   getInvoice: (id) => api.get(`/orders/${id}/invoice`),
   pinOrder: (id, is_pinned) => api.put(`/orders/${id}/pin`, { is_pinned }),
   getReview: (id) => api.get(`/orders/${id}/review`),
@@ -133,7 +134,7 @@ export const cashbackAPI = {
 export const commissionAPI = {
   getBalance: () => api.get('/commission/balance'),
   getHistory: () => api.get('/commission/history'),
-  getOrders: () => api.get('/commission/orders'),
+  getOrders: (params) => api.get('/commission/orders', { params }),
   withdraw: (data) => api.post('/commission/withdraw', data),
 };
 

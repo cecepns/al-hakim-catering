@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { commissionAPI } from '../../utils/api';
+import { commissionAPI, orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import InvoiceModal from '../../components/InvoiceModal';
@@ -11,6 +11,8 @@ const MarketingOrders = () => {
   const [filter, setFilter] = useState('all');
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [savingNotesId, setSavingNotesId] = useState(null);
+  const [notesDrafts, setNotesDrafts] = useState({});
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -45,7 +47,37 @@ const MarketingOrders = () => {
     { value: 'cancelled', label: 'Dibatalkan' },
   ];
 
-  const totalCommission = orders.reduce((sum, order) => sum + (order.commission || 0), 0);
+  const totalCommission = orders.reduce(
+    (sum, order) => sum + (order.commission_amount || 0),
+    0
+  );
+
+  const handleNotesChange = (orderId, value) => {
+    setNotesDrafts((prev) => ({
+      ...prev,
+      [orderId]: value,
+    }));
+  };
+
+  const handleNotesBlur = async (orderId) => {
+    const value =
+      notesDrafts[orderId] !== undefined
+        ? notesDrafts[orderId]
+        : orders.find((o) => o.id === orderId)?.admin_notes || '';
+
+    try {
+      setSavingNotesId(orderId);
+      await orderAPI.updateMarketingAdminNotes(orderId, { notes: value });
+
+      // Refresh list so latest notes from server are shown
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error updating admin notes:', error);
+      // Optionally you can show toast/alert here
+    } finally {
+      setSavingNotesId(null);
+    }
+  };
 
   return (
     <DashboardLayout role="marketing">
@@ -123,80 +155,131 @@ const MarketingOrders = () => {
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       ID Pesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tanggal
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Nama Pemesan & WA
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Produk
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Tgl Pemesanan
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Total
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Alamat
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Kategori Produk
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Metode Pembayaran
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Sisa Pembayaran
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Catatan untuk Admin
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Komisi
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Status
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Aksi
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{order.id}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {new Date(order.created_at).toLocaleDateString('id-ID')}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
-                        {order.product_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        Rp {formatRupiah(order.total_amount)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
-                        Rp {formatRupiah(order.commission)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
-                            order.status
-                          )}`}
-                        >
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            to={`/marketing/orders/${order.id}`}
-                            className="text-primary-600 hover:text-primary-900 text-xs"
-                          >
-                            Detail
-                          </Link>
-                          {order.status !== 'cancelled' && (
-                            <button
-                              onClick={() => {
-                                setSelectedOrderId(order.id);
-                                setInvoiceModalOpen(true);
-                              }}
-                              className="text-green-600 hover:text-green-900 text-xs"
-                              title="Lihat Faktur/Nota"
-                            >
-                              Faktur
-                            </button>
+                  {orders.map((order) => {
+                    const sisaPembayaran =
+                      (order.final_amount || 0) - (order.payment_amount || 0);
+                    const status = order.commission_status || 'pending';
+                    const draftNotes =
+                      notesDrafts[order.id] !== undefined
+                        ? notesDrafts[order.id]
+                        : order.admin_notes || '';
+
+                    return (
+                      <tr key={order.id} className="hover:bg-gray-50 align-top">
+                        <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          #{order.id}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div className="flex flex-col">
+                            <span className="font-medium">
+                              {order.customer_name || order.guest_customer_name || '-'}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {order.customer_phone || order.guest_wa_number_1 || '-'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {new Date(order.created_at).toLocaleDateString('id-ID')}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-900 max-w-xs truncate">
+                          {order.delivery_address || '-'}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {order.categories || '-'}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600 uppercase">
+                          {order.payment_method || '-'}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                          Rp {formatRupiah(Math.max(0, sisaPembayaran))}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-900 max-w-xs">
+                          <textarea
+                            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1 focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                            rows={2}
+                            value={draftNotes}
+                            onChange={(e) => handleNotesChange(order.id, e.target.value)}
+                            onBlur={() => handleNotesBlur(order.id)}
+                            placeholder="Catatan untuk admin..."
+                          />
+                          {savingNotesId === order.id && (
+                            <p className="mt-1 text-[10px] text-gray-400">Menyimpan...</p>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
+                          Rp {formatRupiah(order.commission_amount || 0)}
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <span
+                            className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(
+                              status
+                            )}`}
+                          >
+                            {status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex flex-col gap-1">
+                            <Link
+                              to={`/marketing/orders/${order.id}`}
+                              className="text-primary-600 hover:text-primary-900 text-xs"
+                            >
+                              Detail
+                            </Link>
+                            {order.status !== 'cancelled' && (
+                              <button
+                                onClick={() => {
+                                  setSelectedOrderId(order.id);
+                                  setInvoiceModalOpen(true);
+                                }}
+                                className="text-green-600 hover:text-green-900 text-xs text-left"
+                                title="Lihat Faktur/Nota"
+                              >
+                                Faktur
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

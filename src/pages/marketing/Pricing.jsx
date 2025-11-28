@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { productAPI, authAPI } from '../../utils/api';
+import { productAPI } from '../../utils/api';
 import { getImageUrl } from '../../utils/imageHelper';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -8,21 +8,9 @@ const MarketingPricing = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [commissionPercentage, setCommissionPercentage] = useState(0);
-
-  const fetchUserProfile = async () => {
-    try {
-      const response = await authAPI.getProfile();
-      const commission = response.data?.commission_percentage || 0;
-      setCommissionPercentage(parseFloat(commission) || 0);
-    } catch (err) {
-      console.error('Error fetching user profile:', err);
-    }
-  };
 
   useEffect(() => {
     fetchProducts();
-    fetchUserProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
@@ -150,7 +138,11 @@ const MarketingPricing = () => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {products.map((product) => {
                     const productPrice = product.discounted_price || product.price;
-                    const commissionAmount = (productPrice * commissionPercentage) / 100;
+                    const productCommissionPercentage =
+                      product.commission_percentage != null
+                        ? parseFloat(product.commission_percentage)
+                        : 0;
+                    const commissionAmount = (productPrice * productCommissionPercentage) / 100;
                     return (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -189,9 +181,9 @@ const MarketingPricing = () => {
                           <div className="text-sm font-semibold text-green-600">
                             Rp {formatRupiah(commissionAmount)}
                           </div>
-                          {commissionPercentage > 0 && (
+                          {productCommissionPercentage > 0 && (
                             <div className="text-xs text-gray-500">
-                              ({commissionPercentage}%)
+                              ({productCommissionPercentage}%)
                             </div>
                           )}
                         </td>

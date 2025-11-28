@@ -149,7 +149,7 @@ const MarketingOrderDetail = () => {
             <div className="bg-green-50 border-l-4 border-green-500 rounded-xl shadow-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Komisi Anda</h2>
               <p className="text-4xl font-bold text-green-600">
-                Rp {formatRupiah(order.commission || 0)}
+                Rp {formatRupiah(order.commission_amount || 0)}
               </p>
               <p className="text-sm text-gray-600 mt-2">
                 Dari pesanan Rp {formatRupiah(order.final_amount)}
