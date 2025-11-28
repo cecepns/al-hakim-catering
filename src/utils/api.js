@@ -140,7 +140,10 @@ export const commissionAPI = {
 
 export const adminCommissionAPI = {
   getWithdrawals: (params) => api.get('/admin/commission-withdrawals', { params }),
-  updateWithdrawalStatus: (id, data) => api.put(`/admin/commission-withdrawals/${id}`, data),
+  updateWithdrawalStatus: (id, formData) =>
+    api.put(`/admin/commission-withdrawals/${id}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 };
 
 export const statsAPI = {

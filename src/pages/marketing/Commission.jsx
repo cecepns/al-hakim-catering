@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { commissionAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import { getImageUrl } from '../../utils/imageHelper';
 
 const MarketingCommission = () => {
   const [commission, setCommission] = useState({
@@ -18,6 +19,10 @@ const MarketingCommission = () => {
     account_name: '',
   });
   const [withdrawModal, setWithdrawModal] = useState(false);
+  const [proofModal, setProofModal] = useState({
+    open: false,
+    imageUrl: '',
+  });
 
   useEffect(() => {
     fetchCommission();
@@ -26,8 +31,17 @@ const MarketingCommission = () => {
   const fetchCommission = async () => {
     try {
       setLoading(true);
-      const response = await commissionAPI.getBalance();
-      setCommission(response.data);
+      const [balanceResponse, historyResponse] = await Promise.all([
+        commissionAPI.getBalance(),
+        commissionAPI.getHistory(),
+      ]);
+
+      setCommission({
+        balance: balanceResponse.data.balance || 0,
+        thisMonth: balanceResponse.data.thisMonth || 0,
+        totalEarned: balanceResponse.data.totalEarned || 0,
+        history: historyResponse.data || [],
+      });
     } catch (error) {
       console.error('Error fetching commission:', error);
     } finally {
@@ -182,6 +196,9 @@ const MarketingCommission = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Type
                     </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    Bukti Transfer
+                  </th>
                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                       Jumlah
                     </th>
@@ -204,6 +221,26 @@ const MarketingCommission = () => {
                         >
                           {item.type === 'credit' ? 'Masuk' : 'Keluar'}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                        {item.type === 'debit' &&
+                          item.status === 'completed' &&
+                          item.proof_image_url ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setProofModal({
+                                open: true,
+                                imageUrl: getImageUrl(item.proof_image_url),
+                              })
+                            }
+                            className="text-primary-600 hover:text-primary-900 underline"
+                          >
+                            Lihat
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <span
@@ -299,6 +336,29 @@ const MarketingCommission = () => {
                     Ajukan Penarikan
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Proof Image Modal */}
+        {proofModal.open && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-semibold text-gray-900">Bukti Transfer</h3>
+                <button
+                  onClick={() => setProofModal({ open: false, imageUrl: '' })}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="max-h-[70vh] overflow-auto flex justify-center">
+                <img
+                  src={proofModal.imageUrl}
+                  alt="Bukti transfer"
+                  className="max-h-[65vh] object-contain rounded-lg"
+                />
               </div>
             </div>
           </div>

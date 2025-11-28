@@ -1836,10 +1836,11 @@ app.get('/api/cashback/history', authenticateToken, async (req, res) => {
 
 app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
-    const [result] = await pool.query(
+    // Ambil ringkasan komisi
+    const [commissionSummary] = await pool.query(
       `SELECT
-        -- Saldo yang bisa ditarik: hanya komisi dengan status 'completed'
-        SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as balance,
+        -- Komisi yang sudah benar-benar menjadi hak marketing (status 'completed')
+        SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as totalCompleted,
         -- Komisi bulan ini (semua status, agar lebih merefleksikan performa bulan berjalan)
         SUM(CASE WHEN MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW()) THEN commission_amount ELSE 0 END) as thisMonth,
         -- Total komisi sepanjang waktu (semua status)
@@ -1849,13 +1850,83 @@ app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing')
       [req.user.id]
     );
 
+    const totalCompleted = commissionSummary[0]?.totalCompleted || 0;
+    const thisMonth = commissionSummary[0]?.thisMonth || 0;
+    const totalEarned = commissionSummary[0]?.totalEarned || 0;
+
+    // Ambil total penarikan (pending/approved/completed) untuk mengurangi saldo tersedia
+    const [withdrawSummary] = await pool.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN status IN ('pending', 'approved', 'completed') THEN amount ELSE 0 END), 0) AS totalWithdrawn
+       FROM commission_withdrawals
+       WHERE marketing_id = ?`,
+      [req.user.id]
+    );
+
+    const totalWithdrawn = withdrawSummary[0]?.totalWithdrawn || 0;
+
+    // Saldo tersedia = komisi completed - semua penarikan yang belum ditolak
+    const balance = Math.max(0, totalCompleted - totalWithdrawn);
+
     res.json({
-      balance: result[0]?.balance || 0,
-      thisMonth: result[0]?.thisMonth || 0,
-      totalEarned: result[0]?.totalEarned || 0
+      balance,
+      thisMonth,
+      totalEarned
     });
   } catch (error) {
     console.error('Get commission balance error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Riwayat komisi & penarikan untuk marketing
+app.get('/api/commission/history', authenticateToken, authorizeRole('marketing'), async (req, res) => {
+  try {
+    // Riwayat komisi (credit)
+    const [commissionHistory] = await pool.query(
+      `SELECT 
+         id,
+         created_at,
+         commission_amount AS amount,
+         'credit' AS type,
+         CONCAT('Komisi dari pesanan #', order_id) AS description,
+         NULL AS status,
+         NULL AS proof_image_url
+       FROM commissions
+       WHERE marketing_id = ?
+         AND status != 'cancelled'`,
+      [req.user.id]
+    );
+
+    // Riwayat penarikan (debit)
+    const [withdrawHistory] = await pool.query(
+      `SELECT
+         id,
+         created_at,
+         amount,
+         'debit' AS type,
+         status,
+         proof_image_url,
+         CASE 
+           WHEN status = 'pending' THEN CONCAT('Pengajuan penarikan (menunggu persetujuan) - ', bank_name)
+           WHEN status = 'approved' THEN CONCAT('Penarikan disetujui - ', bank_name)
+           WHEN status = 'completed' THEN CONCAT('Penarikan selesai - ', bank_name)
+           WHEN status = 'rejected' THEN CONCAT('Penarikan ditolak - ', bank_name)
+           ELSE CONCAT('Penarikan komisi - ', bank_name)
+         END AS description
+       FROM commission_withdrawals
+       WHERE marketing_id = ?`,
+      [req.user.id]
+    );
+
+    // Gabungkan dan urutkan berdasarkan tanggal terbaru
+    const history = [...commissionHistory, ...withdrawHistory].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+
+    res.json(history);
+  } catch (error) {
+    console.error('Get commission history error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
@@ -2010,25 +2081,120 @@ app.get('/api/admin/commission-withdrawals', authenticateToken, authorizeRole('a
   }
 });
 
-// Update withdrawal status - Admin
-app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+// Update withdrawal status - Admin (dengan upload bukti & catat pengeluaran arus kas)
+app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRole('admin'), upload.single('proof'), async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { status, admin_notes } = req.body;
 
     if (!['pending', 'approved', 'rejected', 'completed'].includes(status)) {
+      connection.release();
       return res.status(400).json({ message: 'Status tidak valid' });
+    }
+
+    // Ambil data withdrawal saat ini (untuk status lama, amount, dan bukti lama)
+    const [currentRows] = await pool.query(
+      'SELECT id, marketing_id, amount, status AS current_status, proof_image_url FROM commission_withdrawals WHERE id = ?',
+      [id]
+    );
+
+    if (currentRows.length === 0) {
+      connection.release();
+      return res.status(404).json({ message: 'Request penarikan tidak ditemukan' });
+    }
+
+    const current = currentRows[0];
+
+    // Handle upload bukti transfer baru
+    let newProofUrl = current.proof_image_url || null;
+    if (req.file) {
+      const uploadedUrl = `/uploads/${req.file.filename}`;
+
+      // Hapus file bukti lama jika ada
+      if (current.proof_image_url) {
+        const oldFilePath = path.join(__dirname, current.proof_image_url.replace(/^\//, ''));
+        if (fs.existsSync(oldFilePath)) {
+          try {
+            fs.unlinkSync(oldFilePath);
+          } catch (e) {
+            console.error('Gagal menghapus bukti transfer lama:', e);
+          }
+        }
+      }
+
+      newProofUrl = uploadedUrl;
     }
 
     await pool.query(
       `UPDATE commission_withdrawals
-       SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW()
+       SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW(), proof_image_url = ?
        WHERE id = ?`,
-      [status, admin_notes || null, req.user.id, id]
+      [status, admin_notes || null, req.user.id, newProofUrl, id]
     );
 
+    // Jika status berubah menjadi completed dan sebelumnya belum completed,
+    // catat sebagai pengeluaran arus kas (aktivitas operasi)
+    if (status === 'completed' && current.current_status !== 'completed') {
+      try {
+        await connection.beginTransaction();
+
+        // Cek apakah transaksi arus kas untuk penarikan ini sudah ada
+        const [existingTx] = await connection.query(
+          `SELECT id FROM cash_flow_transactions 
+           WHERE commission_withdrawal_id = ? AND type = 'expense'`,
+          [id]
+        );
+
+        if (existingTx.length === 0) {
+          const description = `Penarikan komisi marketing #${current.marketing_id} (withdrawal #${id})`;
+
+          const [txResult] = await connection.query(
+            `INSERT INTO cash_flow_transactions 
+              (type, activity_category, amount, description, order_id, commission_withdrawal_id, created_by) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              'expense',
+              'operasi',
+              current.amount,
+              description,
+              null,
+              id,
+              req.user.id
+            ]
+          );
+
+          const transactionId = txResult.insertId;
+
+          // Catat ke riwayat edit arus kas
+          await connection.query(
+            `INSERT INTO cash_flow_edit_history 
+             (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, change_type) 
+             VALUES (?, ?, ?, ?, ?, ?, 'created')`,
+            [
+              transactionId,
+              req.user.id,
+              'expense',
+              current.amount,
+              description,
+              'operasi'
+            ]
+          );
+        }
+
+        await connection.commit();
+      } catch (err) {
+        await connection.rollback();
+        console.error('Error mencatat pengeluaran arus kas untuk penarikan komisi:', err);
+        // Tidak perlu menggagalkan response utama, cukup log error
+      }
+    }
+
+    connection.release();
     res.json({ message: 'Status penarikan berhasil diupdate' });
   } catch (error) {
+    await connection.rollback().catch(() => {});
+    connection.release();
     console.error('Update withdrawal status error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
   }

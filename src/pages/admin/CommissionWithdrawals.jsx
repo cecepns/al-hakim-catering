@@ -11,6 +11,7 @@ const AdminCommissionWithdrawals = () => {
   const [statusModal, setStatusModal] = useState(false);
   const [newStatus, setNewStatus] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
+  const [proofFile, setProofFile] = useState(null);
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
@@ -35,15 +36,20 @@ const AdminCommissionWithdrawals = () => {
 
     try {
       setUpdating(true);
-      await adminCommissionAPI.updateWithdrawalStatus(selectedWithdrawal.id, {
-        status: newStatus,
-        admin_notes: adminNotes,
-      });
+    const formData = new FormData();
+    formData.append('status', newStatus);
+    formData.append('admin_notes', adminNotes);
+    if (proofFile) {
+      formData.append('proof', proofFile);
+    }
+
+    await adminCommissionAPI.updateWithdrawalStatus(selectedWithdrawal.id, formData);
       alert('Status penarikan berhasil diupdate');
       setStatusModal(false);
       setSelectedWithdrawal(null);
       setNewStatus('');
       setAdminNotes('');
+    setProofFile(null);
       fetchWithdrawals();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -243,6 +249,22 @@ const AdminCommissionWithdrawals = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upload Bukti Transfer (opsional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-gray-700"
+                  />
+                  {selectedWithdrawal.proof_image_url && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Bukti saat ini sudah tersimpan. Upload baru akan menggantikan bukti lama.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Catatan Admin
                   </label>
                   <textarea
@@ -260,6 +282,7 @@ const AdminCommissionWithdrawals = () => {
                       setSelectedWithdrawal(null);
                       setNewStatus('');
                       setAdminNotes('');
+                      setProofFile(null);
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >
