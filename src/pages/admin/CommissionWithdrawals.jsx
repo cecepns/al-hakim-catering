@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { adminCommissionAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import { getImageUrl } from '../../utils/imageHelper';
 
 const AdminCommissionWithdrawals = () => {
   const [withdrawals, setWithdrawals] = useState([]);
@@ -32,24 +33,26 @@ const AdminCommissionWithdrawals = () => {
   };
 
   const handleStatusUpdate = async () => {
-    if (!newStatus) return;
+    // Selalu kirim status saat ini; jika user tidak mengubah dropdown,
+    // newStatus sudah di-set ke status existing ketika modal dibuka.
+    if (!newStatus || !selectedWithdrawal) return;
 
     try {
       setUpdating(true);
-    const formData = new FormData();
-    formData.append('status', newStatus);
-    formData.append('admin_notes', adminNotes);
-    if (proofFile) {
-      formData.append('proof', proofFile);
-    }
+      const formData = new FormData();
+      formData.append('status', newStatus);
+      formData.append('admin_notes', adminNotes);
+      if (proofFile) {
+        formData.append('proof', proofFile);
+      }
 
-    await adminCommissionAPI.updateWithdrawalStatus(selectedWithdrawal.id, formData);
+      await adminCommissionAPI.updateWithdrawalStatus(selectedWithdrawal.id, formData);
       alert('Status penarikan berhasil diupdate');
       setStatusModal(false);
       setSelectedWithdrawal(null);
       setNewStatus('');
       setAdminNotes('');
-    setProofFile(null);
+      setProofFile(null);
       fetchWithdrawals();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -188,17 +191,22 @@ const AdminCommissionWithdrawals = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {withdrawal.status === 'pending' && (
-                          <button
-                            onClick={() => {
-                              setSelectedWithdrawal(withdrawal);
-                              setStatusModal(true);
-                            }}
-                            className="text-primary-600 hover:text-primary-900"
-                          >
-                            Proses
-                          </button>
-                        )}
+                        <button
+                          onClick={() => {
+                            setSelectedWithdrawal(withdrawal);
+                            setNewStatus(withdrawal.status || '');
+                            setAdminNotes(withdrawal.admin_notes || '');
+                            setProofFile(null);
+                            setStatusModal(true);
+                          }}
+                          className={`${
+                            withdrawal.status === 'pending'
+                              ? 'text-primary-600 hover:text-primary-900'
+                              : 'text-gray-600 hover:text-gray-900'
+                          }`}
+                        >
+                          {withdrawal.status === 'pending' ? 'Proses' : 'Detail'}
+                        </button>
                         {withdrawal.admin_notes && (
                           <div className="text-xs text-gray-500 mt-1">
                             Catatan: {withdrawal.admin_notes}
@@ -217,9 +225,17 @@ const AdminCommissionWithdrawals = () => {
         {statusModal && selectedWithdrawal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Update Status Penarikan
+              {(() => {
+                const isCompleted = selectedWithdrawal.status === 'completed';
+                return null;
+              })()}
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Detail & Update Penarikan Komisi
               </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Status saat ini:{' '}
+                <span className="font-semibold">{getStatusLabel(selectedWithdrawal.status)}</span>
+              </p>
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-gray-600 mb-2">
@@ -234,12 +250,24 @@ const AdminCommissionWithdrawals = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Status Baru
+                    Status
                   </label>
+                  {selectedWithdrawal.status === 'completed' && (
+                    <p className="text-xs text-gray-500 mb-1">
+                      Status sudah <span className="font-semibold">Selesai</span> dan tidak dapat diubah lagi.
+                    </p>
+                  )}
                   <select
                     value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    onChange={(e) => {
+                      if (selectedWithdrawal.status !== 'completed') {
+                        setNewStatus(e.target.value);
+                      }
+                    }}
+                    disabled={selectedWithdrawal.status === 'completed'}
+                    className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 ${
+                      selectedWithdrawal.status === 'completed' ? 'bg-gray-100 cursor-not-allowed' : ''
+                    }`}
                   >
                     <option value="">Pilih Status</option>
                     <option value="approved">Disetujui</option>
@@ -258,9 +286,18 @@ const AdminCommissionWithdrawals = () => {
                     className="w-full text-sm text-gray-700"
                   />
                   {selectedWithdrawal.proof_image_url && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Bukti saat ini sudah tersimpan. Upload baru akan menggantikan bukti lama.
-                    </p>
+                    <div className="mt-3">
+                      <p className="text-xs text-gray-500 mb-2">
+                        Bukti saat ini sudah tersimpan. Upload baru akan menggantikan bukti lama.
+                      </p>
+                      <div className="border rounded-lg overflow-hidden bg-gray-50 p-2">
+                        <img
+                          src={getImageUrl(selectedWithdrawal.proof_image_url)}
+                          alt="Bukti transfer"
+                          className="max-h-60 mx-auto object-contain"
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div>

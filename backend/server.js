@@ -2106,6 +2106,13 @@ app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRol
 
     const current = currentRows[0];
 
+    // Jika sudah selesai, tidak boleh mengubah status lagi (tetap 'completed'),
+    // tapi masih boleh update catatan dan bukti transfer.
+    if (current.current_status === 'completed' && status !== 'completed') {
+      connection.release();
+      return res.status(400).json({ message: 'Status penarikan yang sudah selesai tidak dapat diubah' });
+    }
+
     // Handle upload bukti transfer baru
     let newProofUrl = current.proof_image_url || null;
     if (req.file) {
