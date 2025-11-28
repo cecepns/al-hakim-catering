@@ -1106,19 +1106,19 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       [req.params.id, status, req.user.id, handlerName, notes, proof_image_url]
     );
 
-    // Auto-create income entry when order status changes to 'selesai'
+    // Auto-create income entry and update commission status when order status changes to 'selesai'
     if (status === 'selesai' && currentStatus !== 'selesai') {
-      // Check if income entry already exists for this order
-      const [existingIncome] = await pool.query(
-        'SELECT id FROM cash_flow_transactions WHERE order_id = ? AND type = ?',
-        [req.params.id, 'income']
-      );
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
 
-      if (existingIncome.length === 0) {
-        const connection = await pool.getConnection();
-        try {
-          await connection.beginTransaction();
+        // Check if income entry already exists for this order
+        const [existingIncome] = await connection.query(
+          'SELECT id FROM cash_flow_transactions WHERE order_id = ? AND type = ?',
+          [req.params.id, 'income']
+        );
 
+        if (existingIncome.length === 0) {
           // Create income transaction with activity_category = 'operasi'
           const [result] = await connection.query(
             'INSERT INTO cash_flow_transactions (type, activity_category, amount, description, order_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1143,14 +1143,37 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
               `Pemasukan dari pesanan #${req.params.id}`, 'operasi'
             ]
           );
-
-          await connection.commit();
-        } catch (error) {
-          await connection.rollback();
-          console.error('Error creating cash flow transaction for order:', error);
-        } finally {
-          connection.release();
         }
+
+        // Update commission status to 'completed' when order is completed
+        await connection.query(
+          `UPDATE commissions 
+           SET status = 'completed', updated_at = NOW() 
+           WHERE order_id = ? AND status = 'pending'`,
+          [req.params.id]
+        );
+
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        console.error('Error updating order completion status:', error);
+      } finally {
+        connection.release();
+      }
+    }
+
+    // Update commission status to 'cancelled' when order is cancelled
+    if (status === 'dibatalkan' && currentStatus !== 'dibatalkan') {
+      try {
+        await pool.query(
+          `UPDATE commissions 
+           SET status = 'cancelled', updated_at = NOW() 
+           WHERE order_id = ? AND status = 'pending'`,
+          [req.params.id]
+        );
+      } catch (error) {
+        console.error('Error updating commission status to cancelled:', error);
+        // Don't fail the entire request if commission update fails
       }
     }
 
