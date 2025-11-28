@@ -484,12 +484,12 @@ const CashFlow = () => {
                             >
                               Edit
                             </button>
-                            <button
+                            {/* <button
                               onClick={() => handleDelete(transaction.id)}
                               className="text-red-600 hover:text-red-900"
                             >
                               Hapus
-                            </button>
+                            </button> */}
                           </div>
                         </td>
                       </tr>
