@@ -3443,7 +3443,7 @@ app.get('/api/cash-flow/transactions/:id/history', authenticateToken, authorizeR
 app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const { type, activity_category, start_date, end_date } = req.query;
-    
+
     let query = `
       SELECT cft.*, 
              u.name as created_by_name,
@@ -3481,14 +3481,14 @@ app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), asyn
     };
 
     const activityCategoryMap = {
-      'operasi': 'Aktivitas Operasi',
-      'investasi': 'Aktivitas Investasi',
-      'pendanaan': 'Aktivitas Pendanaan'
+      operasi: 'Aktivitas Operasi',
+      investasi: 'Aktivitas Investasi',
+      pendanaan: 'Aktivitas Pendanaan',
     };
 
     const typeMap = {
-      'income': 'Pemasukan',
-      'expense': 'Pengeluaran'
+      income: 'Pemasukan',
+      expense: 'Pengeluaran',
     };
 
     const header = [
@@ -3498,22 +3498,104 @@ app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), asyn
       'Jumlah',
       'Keterangan',
       'Dibuat Oleh',
-      'Pesanan #'
+      'Pesanan #',
     ];
 
     const csvRows = [header.join(',')];
 
+    // Inisialisasi summary untuk setiap kategori aktivitas
+    const summary = {
+      balance: 0,
+      operasi: { totalIncome: 0, totalExpenses: 0, totalCash: 0 },
+      investasi: { totalIncome: 0, totalExpenses: 0, totalCash: 0 },
+      pendanaan: { totalIncome: 0, totalExpenses: 0, totalCash: 0 },
+    };
+
     transactions.forEach((row) => {
+      const amount = Number(row.amount) || 0;
+      const category = row.activity_category;
+      const typeKey = row.type;
+
+      // Tambah baris detail transaksi
       csvRows.push([
         escapeCsv(new Date(row.created_at).toLocaleString('id-ID')),
-        escapeCsv(activityCategoryMap[row.activity_category] || row.activity_category),
-        escapeCsv(typeMap[row.type] || row.type),
-        escapeCsv(row.type === 'income' ? row.amount : -row.amount),
+        escapeCsv(activityCategoryMap[category] || category),
+        escapeCsv(typeMap[typeKey] || typeKey),
+        escapeCsv(typeKey === 'income' ? amount : -amount),
         escapeCsv(row.description || '-'),
         escapeCsv(row.created_by_name || '-'),
-        escapeCsv(row.order_id_ref || '-')
+        escapeCsv(row.order_id_ref || '-'),
       ].join(','));
+
+      // Hitung summary jika kategori dan tipe valid
+      if (summary[category] && (typeKey === 'income' || typeKey === 'expense')) {
+        if (typeKey === 'income') {
+          summary[category].totalIncome += amount;
+          summary.balance += amount;
+        } else if (typeKey === 'expense') {
+          summary[category].totalExpenses += amount;
+          summary.balance -= amount;
+        }
+      }
     });
+
+    // Hitung total kas per kategori
+    ['operasi', 'investasi', 'pendanaan'].forEach((cat) => {
+      summary[cat].totalCash = summary[cat].totalIncome - summary[cat].totalExpenses;
+    });
+
+    // Tambahkan baris kosong pemisah
+    csvRows.push('');
+
+    // TOTAL SALDO
+    csvRows.push([
+      '',
+      'TOTAL SALDO',
+      '',
+      escapeCsv(summary.balance),
+      '',
+      '',
+      '',
+    ].join(','));
+
+    // Fungsi helper untuk menambahkan blok summary per kategori
+    const appendCategorySummary = (key, title) => {
+      const data = summary[key];
+      csvRows.push('');
+      csvRows.push(['', title, '', '', '', '', ''].join(','));
+      csvRows.push([
+        '',
+        '',
+        'TOTAL PEMASUKAN',
+        escapeCsv(data.totalIncome),
+        '',
+        '',
+        '',
+      ].join(','));
+      csvRows.push([
+        '',
+        '',
+        'TOTAL PENGELUARAN',
+        escapeCsv(-data.totalExpenses),
+        '',
+        '',
+        '',
+      ].join(','));
+      csvRows.push([
+        '',
+        '',
+        'TOTAL KAS',
+        escapeCsv(data.totalCash),
+        '',
+        '',
+        '',
+      ].join(','));
+    };
+
+    // Tambahkan summary untuk masing-masing kategori aktivitas
+    appendCategorySummary('operasi', 'AKTIVITAS OPERASI');
+    appendCategorySummary('investasi', 'AKTIVITAS INVESTASI');
+    appendCategorySummary('pendanaan', 'AKTIVITAS PENDANAAN');
 
     const filename = `laporan-arus-kas-${start_date || 'all'}-sd-${end_date || 'all'}.csv`;
 
