@@ -36,3 +36,4 @@ CREATE TABLE IF NOT EXISTS `cash_flow_edit_history` (
   CONSTRAINT `cash_flow_edit_history_ibfk_user` FOREIGN KEY (`changed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+
