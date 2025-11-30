@@ -1837,14 +1837,21 @@ app.get('/api/cashback/history', authenticateToken, async (req, res) => {
 app.get('/api/commission/balance', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
     // Ambil ringkasan komisi
+    // Hanya menghitung komisi dari pesanan yang statusnya 'selesai' (komisi status 'completed')
     const [commissionSummary] = await pool.query(
       `SELECT
         -- Komisi yang sudah benar-benar menjadi hak marketing (status 'completed')
         SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as totalCompleted,
-        -- Komisi bulan ini (semua status, agar lebih merefleksikan performa bulan berjalan)
-        SUM(CASE WHEN MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW()) THEN commission_amount ELSE 0 END) as thisMonth,
-        -- Total komisi sepanjang waktu (semua status)
-        SUM(commission_amount) as totalEarned
+        -- Komisi bulan ini (hanya dari pesanan yang selesai)
+        SUM(CASE 
+          WHEN status = 'completed' 
+          AND MONTH(created_at) = MONTH(NOW()) 
+          AND YEAR(created_at) = YEAR(NOW()) 
+          THEN commission_amount 
+          ELSE 0 
+        END) as thisMonth,
+        -- Total komisi sepanjang waktu (hanya dari pesanan yang selesai)
+        SUM(CASE WHEN status = 'completed' THEN commission_amount ELSE 0 END) as totalEarned
        FROM commissions
        WHERE marketing_id = ?`,
       [req.user.id]
