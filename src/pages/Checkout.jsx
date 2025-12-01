@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { MapPin, Calendar, Clock, FileCheck, Flag, Upload, Phone, Link as LinkIcon, MessageSquare, CheckCircle2, User } from 'lucide-react';
 import { orderAPI, productAPI, voucherAPI } from '../utils/api';
@@ -8,8 +8,10 @@ import { useAuth } from '../context/AuthContext';
 
 const Checkout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const directCheckout = location.state?.directCheckout || null;
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
@@ -39,19 +41,6 @@ const Checkout = () => {
     margin_amount: '', // For marketing users
   });
 
-  useEffect(() => {
-    const productId = searchParams.get('product_id');
-    const qty = parseInt(searchParams.get('quantity')) || 1;
-    
-    if (productId) {
-      setQuantity(qty);
-      fetchProduct(productId);
-    } else {
-      toast.error('Produk tidak ditemukan');
-      navigate('/products');
-    }
-  }, [searchParams, navigate]);
-
   const fetchProduct = async (productId) => {
     try {
       const response = await productAPI.getById(productId);
@@ -62,6 +51,28 @@ const Checkout = () => {
       navigate('/products');
     }
   };
+
+  useEffect(() => {
+    // Support both directCheckout from state (from ProductDetail) and query params (legacy)
+    if (directCheckout) {
+      // Use directCheckout data from state
+      setQuantity(directCheckout.quantity || 1);
+      fetchProduct(directCheckout.product_id);
+    } else {
+      // Fallback to query params (legacy support)
+      const productId = searchParams.get('product_id');
+      const qty = parseInt(searchParams.get('quantity')) || 1;
+      
+      if (productId) {
+        setQuantity(qty);
+        fetchProduct(productId);
+      } else {
+        toast.error('Produk tidak ditemukan');
+        navigate('/products');
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, navigate, directCheckout]);
 
   const handleInputChange = (field, value) => {
     setFormData({ ...formData, [field]: value });
@@ -83,7 +94,14 @@ const Checkout = () => {
     try {
       setVoucherError('');
       const response = await voucherAPI.validate(voucherCode);
-      const baseTotal = (product.discounted_price || product.price) * quantity;
+      
+      // Use directCheckout total_price if available (includes variant + addons), otherwise calculate from product price
+      let baseTotal;
+      if (directCheckout && directCheckout.total_price) {
+        baseTotal = directCheckout.total_price;
+      } else {
+        baseTotal = (product.discounted_price || product.price) * quantity;
+      }
       
       if (baseTotal < response.data.min_purchase) {
         setVoucherError(`Minimal pembelian Rp ${formatRupiah(response.data.min_purchase)}`);
@@ -101,7 +119,14 @@ const Checkout = () => {
   const calculateDiscount = () => {
     if (!voucher || !product) return 0;
     
-    const baseTotal = (product.discounted_price || product.price) * quantity;
+    // Use directCheckout total_price if available (includes variant + addons), otherwise calculate from product price
+    let baseTotal;
+    if (directCheckout && directCheckout.total_price) {
+      baseTotal = directCheckout.total_price;
+    } else {
+      baseTotal = (product.discounted_price || product.price) * quantity;
+    }
+    
     if (baseTotal < voucher.min_purchase) return 0;
 
     if (voucher.discount_type === 'percentage') {
@@ -116,8 +141,16 @@ const Checkout = () => {
 
   const calculateTotal = () => {
     if (!product) return 0;
-    const price = product.discounted_price || product.price;
-    const baseTotal = price * quantity;
+    
+    // Use directCheckout total_price if available (includes variant + addons + quantity), otherwise calculate from product price
+    let baseTotal;
+    if (directCheckout && directCheckout.total_price) {
+      baseTotal = directCheckout.total_price;
+    } else {
+      const price = product.discounted_price || product.price;
+      baseTotal = price * quantity;
+    }
+    
     const discount = calculateDiscount();
     const baseAmount = baseTotal - discount;
     const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
@@ -155,10 +188,14 @@ const Checkout = () => {
       const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
       
       const formDataToSend = new FormData();
-      formDataToSend.append('items', JSON.stringify([{
+      // Support directCheckout with variant_id and addon_ids
+      const items = [{
         product_id: product.id,
+        variant_id: directCheckout?.variant_id || null,
         quantity: quantity,
-      }]));
+        addon_ids: directCheckout?.addon_ids || null,
+      }];
+      formDataToSend.append('items', JSON.stringify(items));
       formDataToSend.append('voucher_code', voucher?.code || '');
       formDataToSend.append('delivery_address', formData.delivery_address || '-');
       formDataToSend.append('delivery_notes', JSON.stringify({
@@ -207,25 +244,28 @@ const Checkout = () => {
     );
   }
 
-  const price = product.discounted_price || product.price;
+  // Use price from directCheckout if available (includes variant), otherwise use product price
+  const price = directCheckout 
+    ? (directCheckout.discounted_price || directCheckout.price)
+    : (product.discounted_price || product.price);
 
   return (
-    <div className="min-h-screen bg-gray-50 py-14 md:py-24">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">
+    <div className="min-h-screen bg-gray-50 py-6 sm:py-10 md:py-14 lg:py-24">
+      <div className="max-w-4xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-4 sm:mb-6 text-center px-2 pt-14">
           FORMAT PEMESANAN AL-HAKIM CATERING
         </h1>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5 md:space-y-6">
           {/* Reference */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <span className="flex items-center gap-2"><MapPin size={16} /> REFERENSI: (Tahu produk kami dari mana?)</span>
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
+              <span className="flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span className="break-words">REFERENSI: (Tahu produk kami dari mana?)</span></span>
             </label>
             <select
               value={formData.reference}
               onChange={(e) => handleInputChange('reference', e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               required
             >
               <option value="">Pilih referensi</option>
@@ -244,15 +284,15 @@ const Checkout = () => {
                 value={formData.reference_detail}
                 onChange={(e) => handleInputChange('reference_detail', e.target.value)}
                 placeholder={formData.reference === 'marketing' ? 'Nama marketing...' : 'Sebutkan...'}
-                className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                className="w-full mt-2 px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 required
               />
             )}
             {/* Show partner fields for marketing users or when reference is marketing */}
             {(user?.role === 'marketing' || formData.reference === 'marketing') && (
-              <div className="mt-4 space-y-4 border-t pt-4">
+              <div className="mt-4 space-y-3 sm:space-y-4 border-t pt-3 sm:pt-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     Nama usaha mitra:
                   </label>
                   <input
@@ -260,17 +300,17 @@ const Checkout = () => {
                     value={formData.partner_business_name}
                     onChange={(e) => handleInputChange('partner_business_name', e.target.value)}
                     placeholder="Nama usaha mitra..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> Nomer WA mitra:</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Nomer WA mitra:</span></label>
                   <input
                     type="tel"
                     value={formData.partner_wa_number}
                     onChange={(e) => handleInputChange('partner_wa_number', e.target.value)}
                     placeholder="08xxxxxxxxxx"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -278,36 +318,36 @@ const Checkout = () => {
           </div>
 
           {/* Event Details */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Untuk acara:</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Untuk acara:</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Nama Acara</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">Nama Acara</label>
                 <input
                   type="text"
                   value={formData.event_name}
                   onChange={(e) => handleInputChange('event_name', e.target.value)}
                   placeholder="Contoh: Aqiqah, Walimah, dll"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Calendar size={16} /> Tanggal</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2"><Calendar className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Tanggal</span></label>
                 <input
                   type="date"
                   value={formData.event_date}
                   onChange={(e) => handleInputChange('event_date', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Clock size={16} /> Waktu</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2"><Clock className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Waktu</span></label>
                 <input
                   type="time"
                   value={formData.event_time}
                   onChange={(e) => handleInputChange('event_time', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
@@ -315,9 +355,9 @@ const Checkout = () => {
           </div>
 
           {/* Delivery Type */}
-          <div className="border-t pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-4">DIANTAR/DIAMBIL?</label>
-            <div className="flex space-x-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-3 sm:mb-4">DIANTAR/DIAMBIL?</label>
+            <div className="flex flex-wrap gap-3 sm:gap-4">
               <label className="flex items-center">
                 <input
                   type="radio"
@@ -344,41 +384,41 @@ const Checkout = () => {
           </div>
 
           {/* Customer Information */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
               {formData.delivery_type === 'diambil' ? 'Jika Diambil:' : 'Jika Diantar:'}
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><User size={16} /> Nama Pemesan *</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><User className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Nama Pemesan *</span></label>
                 <input
                   type="text"
                   value={formData.customer_name}
                   onChange={(e) => handleInputChange('customer_name', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> No.WA 1 *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>No.WA 1 *</span></label>
                   <input
                     type="tel"
                     value={formData.wa_number_1}
                     onChange={(e) => handleInputChange('wa_number_1', e.target.value)}
                     placeholder="08xxxxxxxxxx"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> No.WA 2</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>No.WA 2</span></label>
                   <input
                     type="tel"
                     value={formData.wa_number_2}
                     onChange={(e) => handleInputChange('wa_number_2', e.target.value)}
                     placeholder="08xxxxxxxxxx (Opsional)"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -387,37 +427,37 @@ const Checkout = () => {
 
           {/* Delivery Address (only if diantar) */}
           {formData.delivery_type === 'diantar' && (
-            <div className="border-t pt-4">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Alamat Pengiriman</h3>
-              <div className="space-y-4">
+            <div className="border-t pt-3 sm:pt-4">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Alamat Pengiriman</h3>
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><MapPin size={16} /> Alamat Lengkap *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Alamat Lengkap *</span></label>
                   <textarea
                     value={formData.delivery_address}
                     onChange={(e) => handleInputChange('delivery_address', e.target.value)}
                     rows="3"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><MapPin size={16} /> Patokan</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Patokan</span></label>
                   <input
                     type="text"
                     value={formData.landmark}
                     onChange={(e) => handleInputChange('landmark', e.target.value)}
                     placeholder="Contoh: Depan sekolah, samping masjid, dll"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><LinkIcon size={16} /> Link Sharelok</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><LinkIcon className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Link Sharelok</span></label>
                   <input
                     type="url"
                     value={formData.sharelok_link}
                     onChange={(e) => handleInputChange('sharelok_link', e.target.value)}
                     placeholder="https://..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -425,56 +465,75 @@ const Checkout = () => {
           )}
 
           {/* Order Summary */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Ringkasan Pesanan</h3>
-            <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-              <div className="flex justify-between">
-                <span>Produk:</span>
-                <span className="font-medium">{product.name}</span>
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Ringkasan Pesanan</h3>
+            <div className="bg-gray-50 rounded-lg p-3 sm:p-4 space-y-2">
+              <div className="flex justify-between text-xs sm:text-sm">
+                <span className="break-words pr-2">Produk:</span>
+                <span className="font-medium text-right break-words">{product.name}</span>
               </div>
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center text-xs sm:text-sm">
                 <span>Jumlah:</span>
                 <div className="flex items-center space-x-2">
                   <button
                     type="button"
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-sm sm:text-base"
                   >
                     -
                   </button>
-                  <span className="font-medium w-8 text-center">{quantity}</span>
+                  <span className="font-medium w-6 sm:w-8 text-center">{quantity}</span>
                   <button
                     type="button"
                     onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                    className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center"
+                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-sm sm:text-base"
                   >
                     +
                   </button>
                 </div>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between text-xs sm:text-sm">
                 <span>Harga Satuan:</span>
                 <span className="font-medium">Rp {formatRupiah(price)}</span>
               </div>
-              <div className="flex justify-between">
+              {/* Show variant and addons info if from directCheckout */}
+              {directCheckout && directCheckout.variant_name && (
+                <div className="flex justify-between text-xs sm:text-sm text-gray-600">
+                  <span>Variasi:</span>
+                  <span className="text-right">{directCheckout.variant_name}</span>
+                </div>
+              )}
+              {directCheckout && directCheckout.addons && directCheckout.addons.length > 0 && (
+                <div className="flex justify-between text-xs sm:text-sm text-gray-600">
+                  <span>Add-on:</span>
+                  <span className="text-right">{directCheckout.addons.map(a => a.name).join(', ')}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-xs sm:text-sm">
                 <span>Subtotal:</span>
-                <span className="font-medium">Rp {formatRupiah(price * quantity)}</span>
+                <span className="font-medium">
+                  Rp {formatRupiah(
+                    directCheckout && directCheckout.total_price 
+                      ? directCheckout.total_price 
+                      : price * quantity
+                  )}
+                </span>
               </div>
 
               {/* Voucher */}
               <div className="border-t pt-2">
-                <div className="flex space-x-2 mb-2">
+                <div className="flex flex-col sm:flex-row gap-2 mb-2">
                   <input
                     type="text"
                     value={voucherCode}
                     onChange={(e) => setVoucherCode(e.target.value)}
                     placeholder="Kode voucher"
-                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                    className="flex-1 px-3 py-2 border rounded-lg text-xs sm:text-sm"
                   />
                   <button
                     type="button"
                     onClick={handleValidateVoucher}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm"
+                    className="px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-xs sm:text-sm whitespace-nowrap"
                   >
                     Apply
                   </button>
@@ -493,39 +552,39 @@ const Checkout = () => {
               {/* Marketing Margin */}
               {user?.role === 'marketing' && (
                 <div className="border-t pt-2">
-                  <label className="block text-xs text-gray-600 mb-1">
+                  <label className="block text-xs text-gray-600 mb-1 break-words">
                     Margin Tambahan (akan ditambahkan ke total yang ditagih ke customer)
                   </label>
                   <input
                     type="number"
                     value={formData.margin_amount || ''}
                     onChange={(e) => handleInputChange('margin_amount', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm"
                     placeholder="0"
                   />
                   {formData.margin_amount && parseFloat(formData.margin_amount) > 0 && (
-                    <div className="flex justify-between text-green-600 text-sm mt-1">
+                    <div className="flex justify-between text-green-600 text-xs sm:text-sm mt-1">
                       <span>Margin Tambahan:</span>
-                      <span>+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
+                      <span className="break-words text-right">+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
                     </div>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 mt-1 break-words">
                     Komisi Anda = Komisi dari Admin (otomatis) + Margin ini
                   </p>
                 </div>
               )}
-              <div className="flex justify-between text-xl font-bold text-primary-600 pt-2 border-t">
+              <div className="flex justify-between text-base sm:text-lg md:text-xl font-bold text-primary-600 pt-2 border-t">
                 <span>TOTAL:</span>
-                <span>Rp {formatRupiah(calculateTotal())}</span>
+                <span className="break-words text-right">Rp {formatRupiah(calculateTotal())}</span>
               </div>
-              <p className="text-sm text-gray-500 mt-2">* Harga belum termasuk ongkir</p>
+              <p className="text-xs sm:text-sm text-gray-500 mt-2">* Harga belum termasuk ongkir</p>
             </div>
           </div>
 
           {/* Payment Method */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"><Flag size={16} /> Metode Pembayaran:</h3>
-            <div className="space-y-3">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-1 sm:gap-2 flex-wrap"><Flag className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Metode Pembayaran:</span></h3>
+            <div className="space-y-2 sm:space-y-3">
               {[
                 { value: 'tunai', label: 'TUNAI', requiresProof: true, proofLabel: 'Upload bukti nota' },
                 { value: 'transfer', label: 'TRANSFER', requiresProof: true, proofLabel: 'Upload bukti transfer' },
@@ -533,33 +592,33 @@ const Checkout = () => {
                 { value: 'dp', label: 'DP', requiresProof: true, proofLabel: 'Upload bukti pembayaran' },
               ].map((method) => (
                 <div key={method.value}>
-                  <label className="flex items-center p-4 border rounded-lg cursor-pointer hover:bg-gray-50">
+                  <label className="flex items-center p-3 sm:p-4 border rounded-lg cursor-pointer hover:bg-gray-50">
                     <input
                       type="radio"
                       name="payment_method"
                       value={method.value}
                       checked={formData.payment_method === method.value}
                       onChange={(e) => handleInputChange('payment_method', e.target.value)}
-                      className="w-4 h-4 text-primary-600"
+                      className="w-4 h-4 text-primary-600 flex-shrink-0"
                     />
-                    <span className="ml-3 font-medium">{method.label}</span>
+                    <span className="ml-2 sm:ml-3 font-medium text-sm sm:text-base">{method.label}</span>
                   </label>
                   {formData.payment_method === method.value && (method.value === 'transfer' || method.value === 'dp') && (
-                    <div className="mt-3 ml-7 p-4 bg-gray-50 rounded-lg text-sm">
+                    <div className="mt-2 sm:mt-3 ml-6 sm:ml-7 p-3 sm:p-4 bg-gray-50 rounded-lg text-xs sm:text-sm">
                       <p className="font-medium mb-2">Transfer ke:</p>
-                      <ul className="space-y-1 text-gray-700">
+                      <ul className="space-y-1 text-gray-700 break-words">
                         <li>Shopee pay: 083841161663</li>
                         <li>Dana: 083848099742</li>
-                        <li>BRI: 3642-01-032854-53-5 a/n Muhammad Al Hakim Pamungkas</li>
-                        <li>Seabank: 901677967857 a/n Muhammad Al-Hakim Pamungkas</li>
+                        <li className="break-words">BRI: 3642-01-032854-53-5 a/n Muhammad Al Hakim Pamungkas</li>
+                        <li className="break-words">Seabank: 901677967857 a/n Muhammad Al-Hakim Pamungkas</li>
                       </ul>
                     </div>
                   )}
                   {formData.payment_method === method.value && method.requiresProof && (
-                    <div className="mt-3 ml-7">
+                    <div className="mt-2 sm:mt-3 ml-6 sm:ml-7">
                       {(method.value === 'transfer' || method.value === 'dp' || method.value === 'tunai') && (
                         <div className="mb-3">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                             {method.value === 'dp' ? 'Nominal DP:' : method.value === 'transfer' ? 'Nominal Transfer:' : 'Nominal Pembayaran:'}
                           </label>
                           <input
@@ -567,21 +626,21 @@ const Checkout = () => {
                             value={formData.payment_amount}
                             onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                             placeholder={`Masukkan nominal ${method.value === 'dp' ? 'DP' : method.value === 'transfer' ? 'transfer' : 'pembayaran'}`}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                            className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                             required={formData.payment_method === method.value}
                           />
                         </div>
                       )}
-                      <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Upload size={16} /> {method.proofLabel}</label>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>{method.proofLabel}</span></label>
                       <input
                         type="file"
                         accept="image/*"
                         onChange={handleFileChange}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                        className="w-full px-2 sm:px-4 py-2 text-xs sm:text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                         required={formData.payment_method === method.value}
                       />
                       {formData.payment_proof && (
-                        <p className="mt-2 text-sm text-green-600">✓ File terpilih: {formData.payment_proof.name}</p>
+                        <p className="mt-2 text-xs sm:text-sm text-green-600 break-words">✓ File terpilih: {formData.payment_proof.name}</p>
                       )}
                     </div>
                   )}
@@ -591,42 +650,42 @@ const Checkout = () => {
           </div>
 
           {/* Notes */}
-          <div className="border-t pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-              <MessageSquare size={16} /> Catatan: (Permintaan khusus atau permintaan tambahan)
+          <div className="border-t pt-3 sm:pt-4">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap">
+              <MessageSquare className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span className="break-words">Catatan: (Permintaan khusus atau permintaan tambahan)</span>
             </label>
             <textarea
               value={formData.notes}
               onChange={(e) => handleInputChange('notes', e.target.value)}
               rows="3"
               placeholder="Tulis catatan khusus atau permintaan tambahan..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
           </div>
 
           {/* Verification */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"><FileCheck size={16} /> Verifikasi Pemesanan:</h3>
-            <label className="flex items-start space-x-3 cursor-pointer">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-1 sm:gap-2 flex-wrap"><FileCheck className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Verifikasi Pemesanan:</span></h3>
+            <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={formData.verification}
                 onChange={(e) => handleInputChange('verification', e.target.checked)}
-                className="mt-1 w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
+                className="mt-1 w-4 h-4 sm:w-5 sm:h-5 text-primary-600 rounded focus:ring-primary-500 flex-shrink-0"
                 required
               />
-              <span className="text-gray-700 flex items-center gap-2">
-                <CheckCircle2 size={16} /> Saya telah memeriksa data dan menyetujui pesanan sesuai informasi di atas.
+              <span className="text-xs sm:text-sm text-gray-700 flex items-start gap-1 sm:gap-2">
+                <CheckCircle2 className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0 mt-0.5" /> <span className="break-words">Saya telah memeriksa data dan menyetujui pesanan sesuai informasi di atas.</span>
               </span>
             </label>
           </div>
 
           {/* Submit Button */}
-          <div className="border-t pt-6">
+          <div className="border-t pt-4 sm:pt-6">
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 font-semibold disabled:bg-gray-400 transition"
+              className="w-full bg-primary-600 text-white px-4 sm:px-6 py-3 sm:py-3 rounded-lg hover:bg-primary-700 font-semibold disabled:bg-gray-400 transition text-sm sm:text-base"
             >
               {loading ? 'Memproses...' : 'Kirim Pesanan'}
             </button>

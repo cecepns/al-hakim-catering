@@ -125,7 +125,9 @@ const ProductDetail = () => {
         }))
       };
       
-      navigate("/pembeli/checkout", { state: { directCheckout: directCheckoutData } });
+      // Guest goes to /checkout, logged in users go to /pembeli/checkout
+      const checkoutPath = isGuest ? "/checkout" : "/pembeli/checkout";
+      navigate(checkoutPath, { state: { directCheckout: directCheckoutData } });
     } catch (err) {
       console.error("Error processing purchase:", err);
       toast.error("Gagal melakukan pembelian");

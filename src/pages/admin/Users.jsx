@@ -304,15 +304,15 @@ const AdminUsers = () => {
                             </svg>
                           </button>
                           <button
-                            onClick={() => handleToggleActive(user.id, user.is_active !== false)}
+                            onClick={() => handleToggleActive(user.id, user.is_active)}
                             className={`text-xs ${
-                              user.is_active !== false
+                              user.is_active
                                 ? 'text-red-600 hover:text-red-900'
                                 : 'text-green-600 hover:text-green-900'
                             }`}
-                            title={user.is_active !== false ? 'Nonaktifkan' : 'Aktifkan'}
+                            title={user.is_active ? 'Nonaktifkan' : 'Aktifkan'}
                           >
-                            {user.is_active !== false ? (
+                            {user.is_active ? (
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path
                                   strokeLinecap="round"

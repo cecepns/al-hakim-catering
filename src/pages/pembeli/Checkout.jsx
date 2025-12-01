@@ -306,21 +306,21 @@ const Checkout = () => {
 
   return (
     <DashboardLayout role={user?.role || 'pembeli'}>
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">
+      <div className="max-w-4xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-4 sm:mb-6 text-center px-2 pt-14">
           FORMAT PEMESANAN AL-HAKIM CATERING
         </h1>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-4 sm:p-5 md:p-6 space-y-4 sm:space-y-5 md:space-y-6">
           {/* Reference */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <span className="flex items-center gap-2"><MapPin size={16} /> REFERENSI: (Tahu produk kami dari mana?)</span>
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
+              <span className="flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span className="break-words">REFERENSI: (Tahu produk kami dari mana?)</span></span>
             </label>
             <select
               value={formData.reference}
               onChange={(e) => handleInputChange('reference', e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               required
             >
               <option value="">Pilih referensi</option>
@@ -339,14 +339,14 @@ const Checkout = () => {
                 value={formData.reference_detail}
                 onChange={(e) => handleInputChange('reference_detail', e.target.value)}
                 placeholder={formData.reference === 'marketing' ? 'Nama marketing...' : 'Sebutkan...'}
-                className="w-full mt-2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                className="w-full mt-2 px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 required
               />
             )}
             {formData.reference === 'marketing' && (
-              <div className="mt-4 space-y-4 border-t pt-4">
+              <div className="mt-4 space-y-3 sm:space-y-4 border-t pt-3 sm:pt-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                     Nama usaha mitra:
                   </label>
                   <input
@@ -354,19 +354,19 @@ const Checkout = () => {
                     value={formData.partner_business_name}
                     onChange={(e) => handleInputChange('partner_business_name', e.target.value)}
                     placeholder="Nama usaha mitra..."
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                    <Phone size={16} /> Nomer WA mitra:
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap">
+                    <Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Nomer WA mitra:</span>
                   </label>
                   <input
                     type="tel"
                     value={formData.partner_wa_number}
                     onChange={(e) => handleInputChange('partner_wa_number', e.target.value)}
                     placeholder="08xxxxxxxxxx"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -374,36 +374,36 @@ const Checkout = () => {
           </div>
 
           {/* Event Details */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Untuk acara:</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">Untuk acara:</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Nama Acara</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">Nama Acara</label>
                 <input
                   type="text"
                   value={formData.event_name}
                   onChange={(e) => handleInputChange('event_name', e.target.value)}
                   placeholder="Contoh: Aqiqah, Walimah, dll"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Calendar size={16} /> Tanggal</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2"><Calendar className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Tanggal</span></label>
                 <input
                   type="date"
                   value={formData.event_date}
                   onChange={(e) => handleInputChange('event_date', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Clock size={16} /> Waktu</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2"><Clock className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Waktu</span></label>
                 <input
                   type="time"
                   value={formData.event_time}
                   onChange={(e) => handleInputChange('event_time', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
@@ -411,9 +411,9 @@ const Checkout = () => {
           </div>
 
           {/* Delivery Type */}
-          <div className="border-t pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-4">DIANTAR/DIAMBIL?</label>
-            <div className="flex space-x-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-3 sm:mb-4">DIANTAR/DIAMBIL?</label>
+            <div className="flex flex-wrap gap-3 sm:gap-4">
               <label className="flex items-center">
                 <input
                   type="radio"
@@ -440,41 +440,41 @@ const Checkout = () => {
           </div>
 
           {/* Customer Information */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
               {formData.delivery_type === 'diambil' ? 'Jika Diambil:' : 'Jika Diantar:'}
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><User size={16} /> Nama Pemesan *</label>
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><User className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Nama Pemesan *</span></label>
                 <input
                   type="text"
                   value={formData.customer_name}
                   onChange={(e) => handleInputChange('customer_name', e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> No.WA 1 *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>No.WA 1 *</span></label>
                   <input
                     type="tel"
                     value={formData.wa_number_1}
                     onChange={(e) => handleInputChange('wa_number_1', e.target.value)}
                     placeholder="08xxxxxxxxxx"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><Phone size={16} /> No.WA 2</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Phone className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>No.WA 2</span></label>
                   <input
                     type="tel"
                     value={formData.wa_number_2}
                     onChange={(e) => handleInputChange('wa_number_2', e.target.value)}
                     placeholder="08xxxxxxxxxx (Opsional)"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -483,37 +483,37 @@ const Checkout = () => {
 
           {/* Delivery Address (only if diantar) */}
           {formData.delivery_type === 'diantar' && (
-            <div className="border-t pt-4">
-              <div className="space-y-4">
+            <div className="border-t pt-3 sm:pt-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><MapPin size={16} /> Alamat Lengkap *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Alamat Lengkap *</span></label>
                   <textarea
                     value={formData.delivery_address}
                     onChange={(e) => handleInputChange('delivery_address', e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                     rows="3"
                     placeholder="Alamat lengkap pengiriman"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><MapPin size={16} /> Patokan</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><MapPin className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Patokan</span></label>
                   <input
                     type="text"
                     value={formData.landmark}
                     onChange={(e) => handleInputChange('landmark', e.target.value)}
                     placeholder="Contoh: Depan sekolah SD Negeri 1"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2"><LinkIcon size={16} /> Link Sharelok</label>
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap"><LinkIcon className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Link Sharelok</span></label>
                   <input
                     type="url"
                     value={formData.sharelok_link}
                     onChange={(e) => handleInputChange('sharelok_link', e.target.value)}
                     placeholder="https://share-lok.id/xxxxx"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
               </div>
@@ -521,9 +521,9 @@ const Checkout = () => {
           )}
 
           {/* Order Summary */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">TOTAL:</h3>
-            <div className="bg-gray-50 rounded-lg p-4 space-y-3 mb-4">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">TOTAL:</h3>
+            <div className="bg-gray-50 rounded-lg p-3 sm:p-4 space-y-3 mb-4">
               {/* Cart Items Summary */}
               <div className="space-y-2">
                 {currentItems.map((item, index) => {
@@ -536,34 +536,34 @@ const Checkout = () => {
                     : '';
                   
                   return (
-                    <div key={itemKey} className="flex justify-between text-sm">
-                      <span>
+                    <div key={itemKey} className="flex justify-between text-xs sm:text-sm">
+                      <span className="break-words pr-2">
                         {item.name} {item.variant_name && `(${item.variant_name})`}{addonText} x{item.quantity}
                       </span>
-                      <span>Rp {formatRupiah(itemPrice)}</span>
+                      <span className="text-right break-words">Rp {formatRupiah(itemPrice)}</span>
                     </div>
                   );
                 })}
               </div>
-              <div className="border-t pt-2 flex justify-between">
+              <div className="border-t pt-2 flex justify-between text-xs sm:text-sm">
                 <span className="font-medium">Subtotal:</span>
                 <span className="font-semibold">Rp {formatRupiah(subtotal)}</span>
               </div>
 
               {/* Voucher */}
               <div className="border-t pt-2">
-                <div className="flex space-x-2 mb-2">
+                <div className="flex flex-col sm:flex-row gap-2 mb-2">
                   <input
                     type="text"
                     value={voucherCode}
                     onChange={(e) => setVoucherCode(e.target.value)}
                     placeholder="Kode voucher"
-                    className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                    className="flex-1 px-3 py-2 border rounded-lg text-xs sm:text-sm"
                   />
                   <button
                     type="button"
                     onClick={handleValidateVoucher}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm"
+                    className="px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-xs sm:text-sm whitespace-nowrap"
                   >
                     Apply
                   </button>
@@ -604,56 +604,56 @@ const Checkout = () => {
               {/* Marketing Margin */}
               {user?.role === 'marketing' && (
                 <div className="border-t pt-2">
-                  <label className="block text-xs text-gray-600 mb-1">
+                  <label className="block text-xs text-gray-600 mb-1 break-words">
                     Margin Tambahan (akan ditambahkan ke total yang ditagih ke customer)
                   </label>
                   <input
                     type="number"
                     value={formData.margin_amount || ''}
                     onChange={(e) => handleInputChange('margin_amount', e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    className="w-full px-3 py-2 border rounded-lg text-xs sm:text-sm"
                     placeholder="0"
                   />
                   {formData.margin_amount && parseFloat(formData.margin_amount) > 0 && (
-                    <div className="flex justify-between text-green-600 text-sm mt-1">
+                    <div className="flex justify-between text-green-600 text-xs sm:text-sm mt-1">
                       <span>Margin Tambahan:</span>
-                      <span>+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
+                      <span className="break-words text-right">+ Rp {formatRupiah(parseFloat(formData.margin_amount) || 0)}</span>
                     </div>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 mt-1 break-words">
                     Komisi Anda = Komisi dari Admin (otomatis) + Margin ini
                   </p>
                 </div>
               )}
 
-              <div className="border-t pt-2 flex justify-between text-lg font-bold text-gray-900">
+              <div className="border-t pt-2 flex justify-between text-base sm:text-lg font-bold text-gray-900">
                 <span>Total:</span>
-                <span className="text-primary-600">Rp {formatRupiah(calculateTotal())}</span>
+                <span className="text-primary-600 break-words text-right">Rp {formatRupiah(calculateTotal())}</span>
               </div>
               <p className="text-xs text-gray-500">(Harga belum termasuk ongkir)</p>
             </div>
           </div>
 
           {/* Payment Method */}
-          <div className="border-t pt-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"><Flag size={16} /> Metode Pembayaran:</h3>
-            <div className="space-y-3">
-              <label className="flex items-start space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
+          <div className="border-t pt-3 sm:pt-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4 flex items-center gap-1 sm:gap-2 flex-wrap"><Flag className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Metode Pembayaran:</span></h3>
+            <div className="space-y-2 sm:space-y-3">
+              <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
                 <input
                   type="radio"
                   name="payment_method"
                   value="tunai"
                   checked={formData.payment_method === 'tunai'}
                   onChange={(e) => handleInputChange('payment_method', e.target.value)}
-                  className="mt-1 w-4 h-4 text-primary-600"
+                  className="mt-1 w-4 h-4 text-primary-600 flex-shrink-0"
                 />
-                <div className="flex-1">
-                  <span className="font-medium">TUNAI</span>
-                  <p className="text-sm text-gray-600 mt-1 flex items-center gap-2"><Upload size={14} /> Upload bukti nota</p>
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-sm sm:text-base">TUNAI</span>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /> <span>Upload bukti nota</span></p>
                   {formData.payment_method === 'tunai' && (
                     <>
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                           Nominal Pembayaran:
                         </label>
                         <input
@@ -661,7 +661,7 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal pembayaran"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />
                       </div>
@@ -669,7 +669,7 @@ const Checkout = () => {
                         type="file"
                         accept="image/*"
                         onChange={handleFileChange}
-                        className="mt-2 text-sm"
+                        className="mt-2 text-xs sm:text-sm w-full"
                         required
                       />
                     </>
@@ -677,31 +677,31 @@ const Checkout = () => {
                 </div>
               </label>
 
-              <label className="flex items-start space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
+              <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
                 <input
                   type="radio"
                   name="payment_method"
                   value="transfer"
                   checked={formData.payment_method === 'transfer'}
                   onChange={(e) => handleInputChange('payment_method', e.target.value)}
-                  className="mt-1 w-4 h-4 text-primary-600"
+                  className="mt-1 w-4 h-4 text-primary-600 flex-shrink-0"
                 />
-                <div className="flex-1">
-                  <span className="font-medium">TRANSFER</span>
-                  <p className="text-sm text-gray-600 mt-1">Transfer ke:</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-sm sm:text-base">TRANSFER</span>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Transfer ke:</p>
+                  <p className="text-xs text-gray-500 mt-1 break-words">
                     Shopee pay: 083841161663<br/>
                     Dana: 083848099742<br/>
-                    BRI: 3642-01-032854-53-5<br/>
+                    <span className="break-all">BRI: 3642-01-032854-53-5</span><br/>
                     a/n Muhammad Al Hakim Pamungkas<br/>
-                    Seabank: 901677967857<br/>
+                    <span className="break-all">Seabank: 901677967857</span><br/>
                     a/n Muhammad Al-Hakim Pamungkas
                   </p>
-                  <p className="text-sm text-gray-600 mt-2 flex items-center gap-2"><Upload size={14} /> Upload bukti transfer</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /> <span>Upload bukti transfer</span></p>
                   {formData.payment_method === 'transfer' && (
                     <>
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                           Nominal Transfer:
                         </label>
                         <input
@@ -709,7 +709,7 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal transfer"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />
                       </div>
@@ -717,7 +717,7 @@ const Checkout = () => {
                         type="file"
                         accept="image/*"
                         onChange={handleFileChange}
-                        className="mt-2 text-sm"
+                        className="mt-2 text-xs sm:text-sm w-full"
                         required
                       />
                     </>
@@ -725,45 +725,45 @@ const Checkout = () => {
                 </div>
               </label>
 
-              <label className="flex items-start space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
+              <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
                 <input
                   type="radio"
                   name="payment_method"
                   value="cod"
                   checked={formData.payment_method === 'cod'}
                   onChange={(e) => handleInputChange('payment_method', e.target.value)}
-                  className="mt-1 w-4 h-4 text-primary-600"
+                  className="mt-1 w-4 h-4 text-primary-600 flex-shrink-0"
                 />
                 <div className="flex-1">
-                  <span className="font-medium">COD</span>
+                  <span className="font-medium text-sm sm:text-base">COD</span>
                 </div>
               </label>
 
-              <label className="flex items-start space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
+              <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50">
                 <input
                   type="radio"
                   name="payment_method"
                   value="dp"
                   checked={formData.payment_method === 'dp'}
                   onChange={(e) => handleInputChange('payment_method', e.target.value)}
-                  className="mt-1 w-4 h-4 text-primary-600"
+                  className="mt-1 w-4 h-4 text-primary-600 flex-shrink-0"
                 />
-                <div className="flex-1">
-                  <span className="font-medium">DP</span>
-                  <p className="text-sm text-gray-600 mt-1">Transfer ke:</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-sm sm:text-base">DP</span>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Transfer ke:</p>
+                  <p className="text-xs text-gray-500 mt-1 break-words">
                     Shopee pay: 083841161663<br/>
                     Dana: 083848099742<br/>
-                    BRI: 3642-01-032854-53-5<br/>
+                    <span className="break-all">BRI: 3642-01-032854-53-5</span><br/>
                     a/n Muhammad Al Hakim Pamungkas<br/>
-                    Seabank: 901677967857<br/>
+                    <span className="break-all">Seabank: 901677967857</span><br/>
                     a/n Muhammad Al-Hakim Pamungkas
                   </p>
-                  <p className="text-sm text-gray-600 mt-2 flex items-center gap-2"><Upload size={14} /> Upload bukti pembayaran</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /> <span>Upload bukti pembayaran</span></p>
                   {formData.payment_method === 'dp' && (
                     <>
                       <div className="mt-3">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2">
                           Nominal DP:
                         </label>
                         <input
@@ -771,7 +771,7 @@ const Checkout = () => {
                           value={formData.payment_amount}
                           onChange={(e) => handleInputChange('payment_amount', e.target.value)}
                           placeholder="Masukkan nominal DP"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                          className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                           required
                         />
                       </div>
@@ -779,7 +779,7 @@ const Checkout = () => {
                         type="file"
                         accept="image/*"
                         onChange={handleFileChange}
-                        className="mt-2 text-sm"
+                        className="mt-2 text-xs sm:text-sm w-full"
                         required
                       />
                     </>
@@ -790,43 +790,43 @@ const Checkout = () => {
           </div>
 
           {/* Notes */}
-          <div className="border-t pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-              <MessageSquare size={16} /> Catatan:
+          <div className="border-t pt-3 sm:pt-4">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-2 flex items-center gap-1 sm:gap-2 flex-wrap">
+              <MessageSquare className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0" /> <span>Catatan:</span>
             </label>
             <p className="text-xs text-gray-500 mb-2">(Permintaan khusus atau permintaan tambahan)</p>
             <textarea
               value={formData.notes}
               onChange={(e) => handleInputChange('notes', e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+              className="w-full px-3 sm:px-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
               rows="3"
               placeholder="Catatan khusus untuk pesanan"
             />
           </div>
 
           {/* Verification */}
-          <div className="border-t pt-4">
-            <label className="flex items-start space-x-3 cursor-pointer">
+          <div className="border-t pt-3 sm:pt-4">
+            <label className="flex items-start space-x-2 sm:space-x-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={formData.verification}
                 onChange={(e) => handleInputChange('verification', e.target.checked)}
-                className="mt-1 w-5 h-5 text-primary-600"
+                className="mt-1 w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0"
                 required
               />
-              <span className="text-sm text-gray-700 flex items-center gap-2">
-                <CheckCircle2 size={16} /> Saya telah memeriksa data dan menyetujui pesanan sesuai informasi di atas.
+              <span className="text-xs sm:text-sm text-gray-700 flex items-start gap-1 sm:gap-2">
+                <CheckCircle2 className="w-4 h-4 sm:w-4 sm:h-4 flex-shrink-0 mt-0.5" /> <span className="break-words">Saya telah memeriksa data dan menyetujui pesanan sesuai informasi di atas.</span>
               </span>
             </label>
-            <p className="text-xs text-gray-500 mt-1 ml-8">(Tandai/centang sebelum kirim)</p>
+            <p className="text-xs text-gray-500 mt-1 ml-6 sm:ml-8">(Tandai/centang sebelum kirim)</p>
           </div>
 
           {/* Submit Button */}
-          <div className="border-t pt-4">
+          <div className="border-t pt-4 sm:pt-6">
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed"
+              className="w-full bg-primary-600 text-white px-4 sm:px-6 py-3 rounded-lg hover:bg-primary-700 font-semibold disabled:bg-gray-400 disabled:cursor-not-allowed text-sm sm:text-base"
             >
               {loading ? 'Memproses...' : 'Kirim Pemesanan'}
             </button>
