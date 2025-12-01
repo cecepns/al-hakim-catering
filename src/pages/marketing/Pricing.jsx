@@ -19,24 +19,83 @@ const MarketingPricing = () => {
       setLoading(true);
       const params = filter !== 'all' ? { category: filter } : {};
       const response = await productAPI.getAll(params);
-      
-      // Fetch images for each product and use first image if available
-      const productsWithImages = await Promise.all(
+
+      // Fetch images & variations untuk setiap produk.
+      // Variasi dipakai untuk hitung estimasi komisi "hingga Rp X"
+      // berdasarkan harga varian tertinggi.
+      const productsWithExtras = await Promise.all(
         response.data.map(async (product) => {
+          // Ambil gambar & variasi secara terpisah supaya kalau salah satu error,
+          // data lainnya tetap bisa dipakai (khususnya variasi untuk komisi).
+          let images = [];
+          let variations = [];
+
           try {
             const imagesRes = await productAPI.getImages(product.id);
-            const images = imagesRes.data || [];
-            // Use first image if available, otherwise use product.image_url
-            const displayImage = images.length > 0 ? images[0].media_url : product.image_url;
-            return { ...product, image_url: displayImage };
+            images = imagesRes.data || [];
           } catch {
-            // If images fetch fails, keep the original image_url
-            return product;
+            images = [];
           }
+
+          try {
+            const variationsRes = await productAPI.getVariations(product.id);
+            variations = variationsRes.data || [];
+          } catch {
+            variations = [];
+          }
+
+          // Gambar: pakai gambar pertama jika ada
+          const displayImage =
+            images.length > 0 ? images[0].media_url : product.image_url;
+
+          // Hitung harga varian tertinggi.
+          // Di produk detail, price_adjustment dipakai sebagai HARGA PENUH varian,
+          // jadi di sini kita ambil MAX(price_adjustment) sebagai harga varian tertinggi.
+          const parsedVariantPrices =
+            variations.length > 0
+              ? variations
+                  .map((v) => parseFloat(v.price_adjustment))
+                  .filter((v) => Number.isFinite(v) && v > 0)
+              : [];
+
+          const discountPercent =
+            product.discount_percentage != null
+              ? parseFloat(product.discount_percentage)
+              : 0;
+
+          let highestBasePrice;
+          if (parsedVariantPrices.length > 0) {
+            highestBasePrice = Math.max(...parsedVariantPrices);
+          } else {
+            // Tidak ada variasi: pakai harga produk (discounted_price kalau ada)
+            highestBasePrice = product.discounted_price || product.price || 0;
+          }
+
+          const highestPriceNumber = Number(highestBasePrice) || 0;
+          const effectiveHighestPrice =
+            discountPercent > 0
+              ? highestPriceNumber * (1 - discountPercent / 100)
+              : highestPriceNumber;
+
+          const commissionPercentage =
+            product.commission_percentage != null
+              ? parseFloat(product.commission_percentage)
+              : 0;
+
+          const maxCommissionAmount =
+            effectiveHighestPrice > 0 && commissionPercentage > 0
+              ? (effectiveHighestPrice * commissionPercentage) / 100
+              : 0;
+
+          return {
+            ...product,
+            image_url: displayImage,
+            _max_commission_amount: maxCommissionAmount,
+          };
         })
       );
-      
-      setProducts(productsWithImages);
+
+      setProducts(productsWithExtras);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {
@@ -142,7 +201,16 @@ const MarketingPricing = () => {
                       product.commission_percentage != null
                         ? parseFloat(product.commission_percentage)
                         : 0;
-                    const commissionAmount = (productPrice * productCommissionPercentage) / 100;
+
+                    // Estimasi komisi maksimal per 1 pcs:
+                    // komisi% * harga varian tertinggi (kalau tidak ada variasi, pakai harga produk).
+                    const baseCommissionAmount =
+                      (productPrice * productCommissionPercentage) / 100;
+                    const maxCommissionAmount =
+                      product._max_commission_amount != null
+                        ? product._max_commission_amount
+                        : baseCommissionAmount;
+
                     return (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -178,13 +246,18 @@ const MarketingPricing = () => {
                           <div className="text-sm text-gray-500">{product.category}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-semibold text-green-600">
-                            Rp {formatRupiah(commissionAmount)}
-                          </div>
-                          {productCommissionPercentage > 0 && (
-                            <div className="text-xs text-gray-500">
-                              ({productCommissionPercentage}%)
-                            </div>
+                          {productCommissionPercentage > 0 ? (
+                            <>
+                              <div className="text-sm font-semibold text-green-600">
+                                {productCommissionPercentage}% hingga Rp{' '}
+                                {formatRupiah(maxCommissionAmount)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Estimasi per 1 pcs
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-sm text-gray-400">-</div>
                           )}
                         </td>
                       </tr>

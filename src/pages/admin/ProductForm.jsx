@@ -51,6 +51,13 @@ const ProductForm = () => {
     price: '',
     max_quantity: '0',
   });
+  const [editingAddonId, setEditingAddonId] = useState(null);
+  const [editAddonForm, setEditAddonForm] = useState({
+    name: '',
+    description: '',
+    price: '',
+    max_quantity: '0',
+  });
 
   const fetchProduct = useCallback(async () => {
     try {
@@ -293,6 +300,48 @@ const ProductForm = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditAddon = (addon) => {
+    setEditingAddonId(addon.id);
+    setEditAddonForm({
+      name: addon.name,
+      description: addon.description || '',
+      price: addon.price.toString(),
+      max_quantity: addon.max_quantity != null ? addon.max_quantity.toString() : '0',
+    });
+  };
+
+  const handleUpdateAddon = async (e) => {
+    e.preventDefault();
+    if (!editAddonForm.name || !editAddonForm.price) {
+      toast.warning('Isi nama dan harga add-on');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await productAPI.updateAddon(id, editingAddonId, {
+        name: editAddonForm.name,
+        description: editAddonForm.description,
+        price: parseFloat(editAddonForm.price),
+        max_quantity: parseInt(editAddonForm.max_quantity) || 0,
+      });
+      toast.success('Add-on berhasil diupdate');
+      setEditingAddonId(null);
+      setEditAddonForm({ name: '', description: '', price: '', max_quantity: '0' });
+      fetchProduct();
+    } catch (error) {
+      console.error('Error updating addon:', error);
+      toast.error('Gagal mengupdate add-on');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelEditAddon = () => {
+    setEditingAddonId(null);
+    setEditAddonForm({ name: '', description: '', price: '', max_quantity: '0' });
   };
 
   const handleDeleteAddon = async (addonId) => {
@@ -811,13 +860,72 @@ const ProductForm = () => {
                   </div>
                 </form>
 
+                {/* Edit Addon Form */}
+                {editingAddonId !== null && (
+                  <form onSubmit={handleUpdateAddon} className="border border-blue-300 rounded-lg p-4 bg-blue-50">
+                    <h3 className="font-medium text-gray-900 mb-4">Edit Add-on</h3>
+                    <div className="space-y-4">
+                      <input
+                        type="text"
+                        placeholder="Nama add-on (mis: Es Teh Manis)"
+                        value={editAddonForm.name}
+                        onChange={(e) => setEditAddonForm({ ...editAddonForm, name: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Harga (Rp)"
+                        value={editAddonForm.price}
+                        onChange={(e) => setEditAddonForm({ ...editAddonForm, price: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Jumlah maksimal (0 = unlimited)"
+                        value={editAddonForm.max_quantity}
+                        onChange={(e) => setEditAddonForm({ ...editAddonForm, max_quantity: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      />
+                      <textarea
+                        placeholder="Deskripsi add-on (opsional)"
+                        value={editAddonForm.description}
+                        onChange={(e) => setEditAddonForm({ ...editAddonForm, description: e.target.value })}
+                        rows="2"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
+                        >
+                          Simpan Perubahan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEditAddon}
+                          disabled={loading}
+                          className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition disabled:bg-gray-400"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+
                 {/* List of Addons */}
                 {addons.length > 0 && (
                   <div>
                     <h3 className="font-medium text-gray-900 mb-4">Daftar Add-on</h3>
                     <div className="space-y-3">
                       {addons.map((addon) => (
-                        <div key={addon.id} className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+                        <div
+                          key={addon.id}
+                          className={`flex items-center justify-between p-4 rounded-lg ${
+                            editingAddonId === addon.id ? 'bg-blue-100 border border-blue-300' : 'bg-gray-50'
+                          }`}
+                        >
                           <div>
                             <p className="font-medium text-gray-900">{addon.name}</p>
                             <p className="text-sm text-gray-600">
@@ -827,14 +935,25 @@ const ProductForm = () => {
                               <p className="text-sm text-gray-500">{addon.description}</p>
                             )}
                           </div>
-                          <button
-                            onClick={() => handleDeleteAddon(addon.id)}
-                            disabled={loading}
-                            className="text-red-600 hover:text-red-800 transition"
-                          >
-                            <X size={20} />
-              </button>
-            </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEditAddon(addon)}
+                              disabled={loading || editingAddonId !== null}
+                              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition disabled:bg-gray-400 text-sm"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAddon(addon.id)}
+                              disabled={loading}
+                              className="text-red-600 hover:text-red-800 transition"
+                            >
+                              <X size={20} />
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>

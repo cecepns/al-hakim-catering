@@ -348,6 +348,36 @@ const AdminOrderDetail = () => {
                       </div>
                     );
                   })()}
+
+                  {/* Referensi / Partner Bisnis */}
+                  {(() => {
+                    const referenceName =
+                      order.partner_business_name ||
+                      order.guest_reference_detail ||
+                      order.guest_reference ||
+                      null;
+                    const waNumber = order.partner_wa_number || null;
+
+                    if (!referenceName && !waNumber) return null;
+
+                    return (
+                      <div className="mt-4 bg-primary-50 border border-primary-100 rounded-lg p-4 space-y-1">
+                        <p className="text-sm font-semibold text-primary-800">
+                          Referensi / Partner Bisnis
+                        </p>
+                        {referenceName && (
+                          <p className="text-sm text-gray-800">
+                            Nama: <span className="font-medium">{referenceName}</span>
+                          </p>
+                        )}
+                        {waNumber && (
+                          <p className="text-sm text-gray-800">
+                            No. WA: <span className="font-medium">{waNumber}</span>
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div>

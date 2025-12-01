@@ -7,6 +7,7 @@ import { getImageUrl } from "../utils/imageHelper";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 import { formatRupiah } from "../utils/formatHelper";
+import ImageViewer from "../components/ImageViewer";
 
 const ProductDetail = () => {
   const { id } = useParams();
@@ -20,6 +21,7 @@ const ProductDetail = () => {
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
   const [selectedVariation, setSelectedVariation] = useState(null);
   const [selectedAddons, setSelectedAddons] = useState({});
 
@@ -276,11 +278,17 @@ const ProductDetail = () => {
             {/* IMAGE GALLERY */}
             <div>
               <div className="relative">
-                <img
-                  src={getImageUrl(displayImage)}
-                  alt={product.name}
-                  className="w-full rounded-lg object-cover h-96"
-                />
+                <button
+                  type="button"
+                  onClick={() => setIsImageViewerOpen(true)}
+                  className="block w-full focus:outline-none"
+                >
+                  <img
+                    src={getImageUrl(displayImage)}
+                    alt={product.name}
+                    className="w-full rounded-lg object-cover h-96 cursor-zoom-in"
+                  />
+                </button>
 
                 {/* Image Navigation */}
                 {images.length > 1 && (
@@ -543,6 +551,12 @@ const ProductDetail = () => {
           </div>
         </div>
       </div>
+      <ImageViewer
+        imageUrl={getImageUrl(displayImage)}
+        isOpen={isImageViewerOpen}
+        onClose={() => setIsImageViewerOpen(false)}
+        title={product.name}
+      />
     </div>
   );
 };

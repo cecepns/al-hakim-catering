@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { Pin, PinOff, AlertCircle } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -8,6 +9,7 @@ const KurirOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [pinningOrderId, setPinningOrderId] = useState(null);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -54,6 +56,52 @@ const KurirOrders = () => {
       'tunai': 'Tunai',
     };
     return labels[method] || method || '-';
+  };
+
+  const formatTime = (time) => {
+    if (!time) return '-';
+    return time.substring(0, 5);
+  };
+
+  // Hitung sisa hari & jam menuju acara (dipakai di kolom tanggal, bukan kolom terpisah)
+  const getTimeUntilEvent = (order) => {
+    if (!order.guest_event_date) return null;
+
+    const now = new Date();
+    const eventDate = new Date(order.guest_event_date);
+
+    if (order.guest_event_time) {
+      const [hours, minutes] = order.guest_event_time.split(':');
+      eventDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    }
+
+    const diffMs = eventDate.getTime() - now.getTime();
+    if (diffMs <= 0) return null;
+
+    const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+
+    return { days, hours };
+  };
+
+  const isEventUrgent = (order) => {
+    const timeUntil = getTimeUntilEvent(order);
+    if (!timeUntil) return false;
+    return timeUntil.days <= 7 && (timeUntil.days > 0 || timeUntil.hours > 0);
+  };
+
+  const handlePinOrder = async (orderId, currentPinnedStatus) => {
+    try {
+      setPinningOrderId(orderId);
+      await orderAPI.pinOrder(orderId, !currentPinnedStatus);
+      await fetchOrders();
+    } catch (error) {
+      console.error('Error pinning/unpinning order:', error);
+      alert(error.response?.data?.message || 'Gagal mengubah status sematkan');
+    } finally {
+      setPinningOrderId(null);
+    }
   };
 
   const statuses = [
@@ -136,6 +184,9 @@ const KurirOrders = () => {
                       Sisa Pembayaran
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Tgl & Jam Acara
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Detail Pesanan
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
@@ -144,15 +195,30 @@ const KurirOrders = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Aksi
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Sematkan
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => {
                     const remainingPayment = calculateRemainingPayment(order);
+                    const timeUntil = getTimeUntilEvent(order);
+                    const urgent = isEventUrgent(order);
                     return (
-                      <tr key={order.id} className="hover:bg-gray-50">
+                      <tr
+                        key={order.id}
+                        className={`hover:bg-gray-50 transition-colors ${
+                          order.is_pinned ? 'bg-yellow-50 border-l-4 border-yellow-400' : ''
+                        }`}
+                      >
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          #{order.id}
+                          <div className="flex items-center gap-2">
+                            {!!order.is_pinned && (
+                              <Pin size={16} className="text-yellow-600" fill="currentColor" />
+                            )}
+                            <span>#{order.id}</span>
+                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
@@ -189,6 +255,35 @@ const KurirOrders = () => {
                             <span className="text-green-600 font-medium">Lunas</span>
                           )}
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {order.guest_event_date ? (
+                            <div className="space-y-1">
+                              <div>
+                                {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                                  weekday: 'long',
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                Jam acara: {formatTime(order.guest_event_time)}
+                              </div>
+                              {urgent && timeUntil && (
+                                <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
+                                  <AlertCircle size={14} />
+                                  <span>
+                                    Sisa{' '}
+                                    {timeUntil.days > 0 ? `${timeUntil.days} hari ` : ''}
+                                    {timeUntil.hours} jam lagi
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
                           <div className="truncate" title={order.items_summary || `${order.items_count || 0} item`}>
                             {order.items_summary || `${order.items_count || 0} item`}
@@ -210,6 +305,32 @@ const KurirOrders = () => {
                           >
                             {order.status === 'siap-kirim' ? 'Kirim' : 'Lihat'}
                           </Link>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          <button
+                            onClick={() => handlePinOrder(order.id, order.is_pinned)}
+                            disabled={pinningOrderId === order.id}
+                            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              order.is_pinned
+                                ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            title={order.is_pinned ? 'Batalkan Sematkan' : 'Sematkan Pesanan'}
+                          >
+                            {pinningOrderId === order.id ? (
+                              <span className="animate-spin">⏳</span>
+                            ) : order.is_pinned ? (
+                              <>
+                                <PinOff size={14} />
+                                Batal Sematkan
+                              </>
+                            ) : (
+                              <>
+                                <Pin size={14} />
+                                Sematkan
+                              </>
+                            )}
+                          </button>
                         </td>
                       </tr>
                     );

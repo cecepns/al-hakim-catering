@@ -40,29 +40,47 @@ const DapurOrders = () => {
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const getDaysUntilEvent = (eventDate) => {
+  const getTimeUntilEvent = (eventDate, eventTime) => {
     if (!eventDate) return null;
     const today = new Date();
     const event = new Date(eventDate);
-    const diffTime = event - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+
+    if (eventTime) {
+      const [hours, minutes] = eventTime.split(':');
+      event.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    }
+
+    const diffTime = event.getTime() - today.getTime();
+    if (diffTime <= 0) return null;
+
+    const totalHours = Math.floor(diffTime / (1000 * 60 * 60));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+
+    return { days, hours };
   };
 
-  const isEventUrgent = (eventDate) => {
-    const daysUntil = getDaysUntilEvent(eventDate);
-    return daysUntil !== null && daysUntil <= 7 && daysUntil > 0;
+  const isEventUrgent = (eventDate, eventTime) => {
+    const timeUntil = getTimeUntilEvent(eventDate, eventTime);
+    return (
+      timeUntil !== null &&
+      timeUntil.days <= 7 &&
+      (timeUntil.days > 0 || timeUntil.hours > 0)
+    );
   };
 
-  const hasUrgentOrders = orders.some((order) => isEventUrgent(order.guest_event_date));
+  const hasUrgentOrders = orders.some((order) =>
+    isEventUrgent(order.guest_event_date, order.guest_event_time)
+  );
 
   const formatEventDate = (date) => {
     if (!date) return '-';
     return new Date(date).toLocaleDateString('id-ID', {
+      weekday: 'long',
       year: 'numeric',
       month: 'short',
       day: 'numeric',
-    });
+  });
   };
 
   const formatEventTime = (time) => {
@@ -208,10 +226,22 @@ const DapurOrders = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                         <div>
                           {formatEventDate(order.guest_event_date)}
-                          {isEventUrgent(order.guest_event_date) && (
+                          {isEventUrgent(order.guest_event_date, order.guest_event_time) && (
                             <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
                               <AlertCircle size={14} />
-                              {getDaysUntilEvent(order.guest_event_date)} hari lagi
+                              {(() => {
+                                const timeUntil = getTimeUntilEvent(
+                                  order.guest_event_date,
+                                  order.guest_event_time
+                                );
+                                if (!timeUntil) return null;
+                                return (
+                                  <>
+                                    {timeUntil.days > 0 ? `${timeUntil.days} hari ` : ''}
+                                    {timeUntil.hours} jam lagi
+                                  </>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>

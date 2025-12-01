@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Pin, PinOff } from 'lucide-react';
+import { Pin, PinOff, AlertCircle } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -133,6 +133,35 @@ const AdminOrders = () => {
     return time.substring(0, 5);
   };
 
+  const getTimeUntilEvent = (eventDate, eventTime) => {
+    if (!eventDate) return null;
+    const now = new Date();
+    const event = new Date(eventDate);
+
+    if (eventTime) {
+      const [hours, minutes] = eventTime.split(':');
+      event.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    }
+
+    const diffMs = event.getTime() - now.getTime();
+    if (diffMs <= 0) return null;
+
+    const totalHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+
+    return { days, hours };
+  };
+
+  const isEventUrgent = (eventDate, eventTime) => {
+    const timeUntil = getTimeUntilEvent(eventDate, eventTime);
+    return (
+      timeUntil !== null &&
+      timeUntil.days <= 7 &&
+      (timeUntil.days > 0 || timeUntil.hours > 0)
+    );
+  };
+
   return (
     <DashboardLayout role="admin">
       <div>
@@ -259,13 +288,38 @@ const AdminOrders = () => {
                         {order.categories || '-'}
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {order.guest_event_date
-                          ? new Date(order.guest_event_date).toLocaleDateString('id-ID', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric',
-                            })
-                          : '-'}
+                        {order.guest_event_date ? (
+                          <div className="space-y-1">
+                            <div>
+                              {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                                weekday: 'long',
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </div>
+                            {isEventUrgent(order.guest_event_date, order.guest_event_time) && (
+                              <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
+                                <AlertCircle size={14} />
+                                {(() => {
+                                  const timeUntil = getTimeUntilEvent(
+                                    order.guest_event_date,
+                                    order.guest_event_time
+                                  );
+                                  if (!timeUntil) return null;
+                                  return (
+                                    <>
+                                      {timeUntil.days > 0 ? `${timeUntil.days} hari ` : ''}
+                                      {timeUntil.hours} jam lagi
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          '-'
+                        )}
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
                         {formatTime(order.guest_event_time)}

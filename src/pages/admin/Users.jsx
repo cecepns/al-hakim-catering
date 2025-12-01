@@ -276,12 +276,12 @@ const AdminUsers = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span
                           className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            user.is_active !== false
+                            user.is_active 
                               ? 'bg-green-100 text-green-800'
                               : 'bg-red-100 text-red-800'
                           }`}
                         >
-                          {user.is_active !== false ? 'Aktif' : 'Nonaktif'}
+                          {user.is_active ? 'Aktif' : 'Nonaktif'}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">

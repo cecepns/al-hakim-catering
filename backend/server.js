@@ -103,7 +103,8 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [users] = await pool.query('SELECT * FROM users WHERE email = ? AND (is_active IS NULL OR is_active = 1)', [email]);
+    // Ambil user berdasarkan email saja supaya bisa bedakan akun nonaktif
+    const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
 
     if (users.length === 0) {
       return res.status(401).json({ message: 'Email atau password salah' });
@@ -114,6 +115,11 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!validPassword) {
       return res.status(401).json({ message: 'Email atau password salah' });
+    }
+
+    // Cek status aktif akun (0 = nonaktif)
+    if (user.is_active === 0) {
+      return res.status(403).json({ message: 'Akun Anda nonaktif. Silakan hubungi admin.' });
     }
 
     const token = jwt.sign(
@@ -130,7 +136,8 @@ app.post('/api/auth/login', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        cashback_balance: user.cashback_balance
+        cashback_balance: user.cashback_balance,
+        is_active: user.is_active
       }
     });
   } catch (error) {
@@ -142,7 +149,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
     const [users] = await pool.query(
-      'SELECT id, name, email, phone, address, role, cashback_balance, commission_percentage FROM users WHERE id = ?',
+      'SELECT id, name, email, phone, address, role, cashback_balance, commission_percentage, is_active FROM users WHERE id = ?',
       [req.user.id]
     );
 
