@@ -75,112 +75,26 @@ const OperasionalOrders = () => {
     );
   };
 
-  const formatDateTime = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleString('id-ID', {
-      weekday: 'short',
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const getDeadlines = (order) => {
-    const createdAt = order.created_at ? new Date(order.created_at) : null;
-
-    let eventDateTime = null;
-    if (order.guest_event_date) {
-      const eventDate = new Date(order.guest_event_date);
-      if (order.guest_event_time) {
-        const [hours, minutes] = order.guest_event_time.split(':');
-        eventDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-      }
-      eventDateTime = eventDate;
-    }
-
-    // Tenggang waktu proses: 7 hari sejak pesanan dibuat
-    const processDeadline = createdAt
-      ? new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000)
-      : null;
-
-    // Tenggang waktu pengiriman: 48 jam sebelum acara
-    const shippingDeadline = eventDateTime
-      ? new Date(eventDateTime.getTime() - 48 * 60 * 60 * 1000)
-      : null;
-
-    // Tenggang waktu tiba: 1 jam sebelum jam acara
-    const arrivalDeadline = eventDateTime
-      ? new Date(eventDateTime.getTime() - 60 * 60 * 1000)
-      : null;
-
-    return { processDeadline, shippingDeadline, arrivalDeadline };
-  };
-
-  const getDeadlineBadge = (order) => {
+  // Cek peringatan untuk proses (kurang dari 7 hari sejak pesanan dibuat)
+  const isProcessUrgent = (order) => {
+    // Hanya untuk status yang belum selesai dan belum diproses
+    if (!order.created_at || order.status === 'selesai' || order.tanggal_proses) return false;
     const now = new Date();
-    const { processDeadline, shippingDeadline, arrivalDeadline } = getDeadlines(order);
-    const isFinished = order.status === 'selesai';
+    const createdAt = new Date(order.created_at);
+    const diffMs = now.getTime() - createdAt.getTime();
+    const daysSinceCreated = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    // Peringatan jika sudah >= 6 hari (mendekati 7 hari)
+    return daysSinceCreated >= 6;
+  };
 
-    if (!processDeadline && !shippingDeadline && !arrivalDeadline) {
-      return {
-        label: 'Tidak ada tenggat',
-        colorClass: 'bg-gray-100 text-gray-700',
-      };
-    }
-
-    if (!isFinished && arrivalDeadline && now > arrivalDeadline) {
-      return {
-        label: 'Lewat batas tiba',
-        colorClass: 'bg-red-100 text-red-800',
-      };
-    }
-
-    if (!isFinished && shippingDeadline && now > shippingDeadline) {
-      return {
-        label: 'Lewat batas kirim (48 jam)',
-        colorClass: 'bg-orange-100 text-orange-800',
-      };
-    }
-
-    if (!isFinished && processDeadline && now > processDeadline) {
-      return {
-        label: 'Lewat batas proses (7 hari)',
-        colorClass: 'bg-orange-100 text-orange-800',
-      };
-    }
-
-    // Ambil tenggat terdekat yang masih di depan
-    const futureDeadlines = [processDeadline, shippingDeadline, arrivalDeadline]
-      .filter((d) => d && d > now)
-      .sort((a, b) => a - b);
-
-    if (!futureDeadlines.length) {
-      return {
-        label: '-',
-        colorClass: 'bg-gray-100 text-gray-700',
-      };
-    }
-
-    const target = futureDeadlines[0];
-    const diffMs = target - now;
-    const hours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
-    const minutes = Math.max(
-      0,
-      Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
-    );
-
-    let colorClass = 'bg-green-100 text-green-800';
-    if (hours < 2) {
-      colorClass = 'bg-red-100 text-red-800';
-    } else if (hours < 6) {
-      colorClass = 'bg-orange-100 text-orange-800';
-    }
-
-    return {
-      label: `Sisa ${hours}j ${minutes}m`,
-      colorClass,
-    };
+  // Cek peringatan untuk pengiriman (kurang dari 48 jam sebelum acara)
+  const isShippingUrgent = (order) => {
+    // Hanya untuk status yang belum dikirim dan belum selesai
+    if (!order.guest_event_date || order.status === 'selesai' || order.status === 'dikirim' || order.tanggal_pengiriman) return false;
+    const timeUntil = getTimeUntilEvent(order.guest_event_date, order.guest_event_time);
+    if (!timeUntil) return false;
+    const totalHours = timeUntil.days * 24 + timeUntil.hours;
+    return totalHours < 48 && totalHours > 0;
   };
 
   const handlePinOrder = async (orderId, currentPinnedStatus) => {
@@ -272,10 +186,10 @@ const OperasionalOrders = () => {
                       Status
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Tgl & Jam Acara
+                      Tanggal
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
-                      Tenggang Waktu
+                      Jam
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Tanggal Proses
@@ -299,8 +213,6 @@ const OperasionalOrders = () => {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {orders.map((order) => {
-                    const { processDeadline, shippingDeadline, arrivalDeadline } = getDeadlines(order);
-                    const deadlineBadge = getDeadlineBadge(order);
                     return (
                       <tr
                         key={order.id}
@@ -337,19 +249,36 @@ const OperasionalOrders = () => {
                         </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {order.guest_event_date ? (
-                          <div className="space-y-1">
-                            <div>
-                              {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
-                                weekday: 'long',
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                              })}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Jam acara: {formatTime(order.guest_event_time)}
-                            </div>
-                            {isEventUrgent(order.guest_event_date, order.guest_event_time) && (
+                          <div>
+                            {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                              weekday: 'long',
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                            {isProcessUrgent(order) && (
+                              <div className="text-red-600 text-xs mt-1 flex items-center gap-1">
+                                <AlertCircle size={14} />
+                                <span>Peringatan: Proses mendekati 7 hari</span>
+                              </div>
+                            )}
+                            {isShippingUrgent(order) && (
+                              <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
+                                <AlertCircle size={14} />
+                                {(() => {
+                                  const timeUntil = getTimeUntilEvent(
+                                    order.guest_event_date,
+                                    order.guest_event_time
+                                  );
+                                  if (!timeUntil) return null;
+                                  const totalHours = timeUntil.days * 24 + timeUntil.hours;
+                                  return (
+                                    <span>Peringatan: Kurang dari 48 jam ({totalHours} jam) untuk pengiriman</span>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                            {isEventUrgent(order.guest_event_date, order.guest_event_time) && !isProcessUrgent(order) && !isShippingUrgent(order) && (
                               <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
                                 <AlertCircle size={14} />
                                 {(() => {
@@ -373,35 +302,7 @@ const OperasionalOrders = () => {
                         )}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {processDeadline || shippingDeadline || arrivalDeadline ? (
-                          <div className="space-y-1">
-                            {processDeadline && (
-                              <div className="text-xs">
-                                <span className="font-semibold">Proses max (7h):</span>{' '}
-                                {formatDateTime(processDeadline)}
-                              </div>
-                            )}
-                            {shippingDeadline && (
-                              <div className="text-xs">
-                                <span className="font-semibold">Kirim max (48j):</span>{' '}
-                                {formatDateTime(shippingDeadline)}
-                              </div>
-                            )}
-                            {arrivalDeadline && (
-                              <div className="text-xs">
-                                <span className="font-semibold">Tiba max (-1j):</span>{' '}
-                                {formatDateTime(arrivalDeadline)}
-                              </div>
-                            )}
-                            <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${deadlineBadge.colorClass}`}
-                            >
-                              {deadlineBadge.label}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
+                        {formatTime(order.guest_event_time)}
                       </td>
                       <td className="px-3 md:px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
                         {order.tanggal_proses ? (

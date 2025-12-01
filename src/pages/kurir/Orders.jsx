@@ -88,7 +88,9 @@ const KurirOrders = () => {
   const isEventUrgent = (order) => {
     const timeUntil = getTimeUntilEvent(order);
     if (!timeUntil) return false;
-    return timeUntil.days <= 7 && (timeUntil.days > 0 || timeUntil.hours > 0);
+    // Peringatan jika kurang dari 48 jam sebelum acara
+    const totalHours = timeUntil.days * 24 + timeUntil.hours;
+    return totalHours < 48 && totalHours > 0;
   };
 
   const handlePinOrder = async (orderId, currentPinnedStatus) => {
@@ -184,7 +186,10 @@ const KurirOrders = () => {
                       Sisa Pembayaran
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                      Tgl & Jam Acara
+                      Tanggal
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Jam
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Detail Pesanan
@@ -257,25 +262,20 @@ const KurirOrders = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                           {order.guest_event_date ? (
-                            <div className="space-y-1">
-                              <div>
-                                {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
-                                  weekday: 'long',
-                                  day: '2-digit',
-                                  month: 'short',
-                                  year: 'numeric',
-                                })}
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                Jam acara: {formatTime(order.guest_event_time)}
-                              </div>
+                            <div>
+                              {new Date(order.guest_event_date).toLocaleDateString('id-ID', {
+                                weekday: 'long',
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
                               {urgent && timeUntil && (
                                 <div className="text-orange-600 text-xs mt-1 flex items-center gap-1">
                                   <AlertCircle size={14} />
                                   <span>
-                                    Sisa{' '}
+                                    Peringatan: Kurang dari 48 jam (
                                     {timeUntil.days > 0 ? `${timeUntil.days} hari ` : ''}
-                                    {timeUntil.hours} jam lagi
+                                    {timeUntil.hours} jam) sebelum acara
                                   </span>
                                 </div>
                               )}
@@ -283,6 +283,9 @@ const KurirOrders = () => {
                           ) : (
                             <span className="text-gray-400">-</span>
                           )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {formatTime(order.guest_event_time)}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
                           <div className="truncate" title={order.items_summary || `${order.items_count || 0} item`}>
