@@ -587,14 +587,18 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       
       let variant_name = null;
       
-      // Add variant price adjustment if variant is selected
+      // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
         const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
         if (variants.length === 0) {
           throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
-        const variantAdjustment = parseFloat(variants[0].price_adjustment) || 0;
-        price += variantAdjustment;
+        const variantPrice = parseFloat(variants[0].price_adjustment) || 0;
+        if (isNaN(variantPrice) || variantPrice < 0) {
+          throw new Error(`Harga varian untuk produk "${product.name}" tidak valid`);
+        }
+        // Use variant price as the full price, not added to base price
+        price = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
       }
       
