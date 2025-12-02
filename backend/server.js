@@ -521,7 +521,13 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
     let delivery_notes = req.body.delivery_notes || '';
     const payment_method = req.body.payment_method || 'transfer';
     const voucher_code = req.body.voucher_code && req.body.voucher_code !== '' ? req.body.voucher_code : null;
-    const margin_amount = req.body.margin_amount ? parseFloat(req.body.margin_amount) : 0;
+
+    // Safely parse margin_amount to avoid NaN being sent to the database
+    let margin_amount = 0;
+    if (req.body.margin_amount !== undefined && req.body.margin_amount !== null && req.body.margin_amount !== '') {
+      const parsedMargin = parseFloat(req.body.margin_amount);
+      margin_amount = Number.isFinite(parsedMargin) ? parsedMargin : 0;
+    }
 
     // Parse delivery_notes JSON untuk extract data ke kolom terpisah
     let guestData = {};
@@ -573,7 +579,12 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         throw new Error(`Stok produk "${product.name}" tidak mencukupi. Stok tersedia: ${product.stock}`);
       }
 
-      let price = product.discounted_price || product.price;
+      // Ensure price is a valid number
+      let price = parseFloat(product.discounted_price) || parseFloat(product.price) || 0;
+      if (isNaN(price) || price < 0) {
+        price = 0;
+      }
+      
       let variant_name = null;
       
       // Add variant price adjustment if variant is selected
@@ -582,12 +593,33 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         if (variants.length === 0) {
           throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
-        price += variants[0].price_adjustment;
+        const variantAdjustment = parseFloat(variants[0].price_adjustment) || 0;
+        price += variantAdjustment;
         variant_name = variants[0].name; // Get variant name from database
       }
       
-      const subtotal = price * item.quantity;
-      total_amount += subtotal;
+      // Process addons if provided
+      let addonTotal = 0;
+      if (item.addon_ids && Array.isArray(item.addon_ids) && item.addon_ids.length > 0) {
+        const placeholders = item.addon_ids.map(() => '?').join(',');
+        const [addons] = await connection.query(
+          `SELECT id, name, price FROM product_addons WHERE id IN (${placeholders}) AND product_id = ? AND is_active = TRUE`,
+          [...item.addon_ids, item.product_id]
+        );
+        
+        for (const addon of addons) {
+          const addonPrice = parseFloat(addon.price) || 0;
+          addonTotal += addonPrice;
+        }
+      }
+      
+      // Calculate subtotal: (base_price + addon_total) * quantity
+      const basePriceWithAddons = price + addonTotal;
+      const subtotal = basePriceWithAddons * item.quantity;
+      
+      // Ensure subtotal is a valid number
+      const validSubtotal = isNaN(subtotal) ? 0 : subtotal;
+      total_amount += validSubtotal;
 
       orderItems.push({
         product_id: item.product_id,
@@ -595,8 +627,8 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         product_name: product.name,
         variant_name: variant_name,
         quantity: item.quantity,
-        price: price,
-        subtotal: subtotal
+        price: basePriceWithAddons, // Price includes addons
+        subtotal: validSubtotal
       });
     }
 
@@ -633,9 +665,19 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       }
     }
 
+    // Ensure all amounts are valid numbers (not NaN)
+    total_amount = isNaN(total_amount) ? 0 : parseFloat(total_amount) || 0;
+    discount_amount = isNaN(discount_amount) ? 0 : parseFloat(discount_amount) || 0;
+    margin_amount = isNaN(margin_amount) ? 0 : parseFloat(margin_amount) || 0;
+    
     // Calculate base_amount (before margin) and final_amount (with margin)
     const base_amount = total_amount - discount_amount;
-    const final_amount = base_amount + margin_amount;
+    const final_amount = Math.max(0, base_amount + margin_amount);
+    
+    // Final validation to ensure no NaN values
+    if (isNaN(total_amount) || isNaN(discount_amount) || isNaN(final_amount)) {
+      throw new Error('Invalid amount calculation detected');
+    }
 
     // Parse event_date dan event_time untuk kolom terpisah
     let eventDate = null;
@@ -648,7 +690,16 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
     }
 
     // Extract payment amount and partner info from delivery_notes
-    const payment_amount = guestData.payment_amount ? parseFloat(guestData.payment_amount) : null;
+    // Safely parse payment_amount from delivery notes to avoid NaN
+    let payment_amount = null;
+    if (
+      guestData.payment_amount !== undefined &&
+      guestData.payment_amount !== null &&
+      guestData.payment_amount !== ''
+    ) {
+      const parsedPayment = parseFloat(guestData.payment_amount);
+      payment_amount = Number.isFinite(parsedPayment) ? parsedPayment : null;
+    }
     const partner_business_name = guestData.partner_business_name || null;
     const partner_wa_number = guestData.partner_wa_number || null;
 
@@ -831,23 +882,46 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
       let variant_name = null;
       
-      // Add variant price adjustment if variant is selected
+      // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
         const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
         if (variants.length === 0) {
           throw new Error(`Varian tidak ditemukan atau tidak aktif untuk produk "${product.name}"`);
         }
-        const adjustment = Number(variants[0].price_adjustment || 0);
-        if (!Number.isFinite(adjustment)) {
-          throw new Error(`Penyesuaian harga varian untuk produk "${product.name}" tidak valid`);
+        const variantPrice = Number(variants[0].price_adjustment || 0);
+        if (!Number.isFinite(variantPrice) || variantPrice < 0) {
+          throw new Error(`Harga varian untuk produk "${product.name}" tidak valid`);
         }
-        price += adjustment;
+        // Use variant price as the full price, not added to base price
+        price = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
       }
       
-      const subtotal = price * item.quantity;
-      total_amount += subtotal;
-      cashback_earned += subtotal * (productCashbackPercentage / 100);
+      // Process addons if provided
+      let addonTotal = 0;
+      if (item.addon_ids && Array.isArray(item.addon_ids) && item.addon_ids.length > 0) {
+        const placeholders = item.addon_ids.map(() => '?').join(',');
+        const [addons] = await connection.query(
+          `SELECT id, name, price FROM product_addons WHERE id IN (${placeholders}) AND product_id = ? AND is_active = TRUE`,
+          [...item.addon_ids, item.product_id]
+        );
+        
+        for (const addon of addons) {
+          const addonPrice = Number(addon.price || 0);
+          if (Number.isFinite(addonPrice) && addonPrice >= 0) {
+            addonTotal += addonPrice;
+          }
+        }
+      }
+      
+      // Calculate subtotal: (base_price + addon_total) * quantity
+      const basePriceWithAddons = price + addonTotal;
+      const subtotal = basePriceWithAddons * item.quantity;
+      
+      // Ensure subtotal is a valid number
+      const validSubtotal = Number.isFinite(subtotal) ? subtotal : 0;
+      total_amount += validSubtotal;
+      cashback_earned += validSubtotal * (productCashbackPercentage / 100);
 
       orderItems.push({
         product_id: item.product_id,
@@ -855,8 +929,8 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         product_name: product.name,
         variant_name: variant_name,
         quantity: item.quantity,
-        price: price,
-        subtotal: subtotal
+        price: basePriceWithAddons, // Price includes addons
+        subtotal: validSubtotal
       });
     }
 
@@ -904,8 +978,14 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
     }
 
+    // Ensure all amounts are valid numbers (not NaN)
+    total_amount = Number.isFinite(total_amount) ? Number(total_amount) : 0;
+    discount_amount = Number.isFinite(discount_amount) ? Number(discount_amount) : 0;
+    cashback_used = Number.isFinite(cashback_used) ? Number(cashback_used) : 0;
+    margin_amount = Number.isFinite(margin_amount) ? Number(margin_amount) : 0;
+    
     // Calculate base_amount (before margin) and final_amount (with margin)
-    const base_amount = total_amount - discount_amount - (cashback_used || 0);
+    const base_amount = total_amount - discount_amount - cashback_used;
     
     // Validate base_amount is not negative
     if (base_amount < 0) {
