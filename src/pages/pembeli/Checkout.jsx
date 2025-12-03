@@ -526,22 +526,33 @@ const Checkout = () => {
             <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">TOTAL:</h3>
             <div className="bg-gray-50 rounded-lg p-3 sm:p-4 space-y-3 mb-4">
               {/* Cart Items Summary */}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {currentItems.map((item, index) => {
                   const itemKey = directCheckout ? `direct-${index}` : item.id;
                   const itemPrice = directCheckout 
                     ? item.total_price 
                     : (item.discounted_price || item.price) * item.quantity;
-                  const addonText = directCheckout && directCheckout.addons?.length > 0
-                    ? ` + ${directCheckout.addons.map(a => a.name).join(', ')}`
-                    : '';
                   
                   return (
-                    <div key={itemKey} className="flex justify-between text-xs sm:text-sm">
-                      <span className="break-words pr-2">
-                        {item.name} {item.variant_name && `(${item.variant_name})`}{addonText} x{item.quantity}
-                      </span>
-                      <span className="text-right break-words">Rp {formatRupiah(itemPrice)}</span>
+                    <div key={itemKey} className="space-y-1">
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="break-words pr-2 font-medium">
+                          {item.name} x{item.quantity}
+                        </span>
+                        <span className="text-right break-words font-semibold">Rp {formatRupiah(itemPrice)}</span>
+                      </div>
+                      {item.variant_name && (
+                        <div className="flex justify-between text-xs sm:text-sm text-gray-600 pl-2">
+                          <span>Variasi:</span>
+                          <span className="text-right">{item.variant_name}</span>
+                        </div>
+                      )}
+                      {directCheckout && directCheckout.addons && directCheckout.addons.length > 0 && (
+                        <div className="flex justify-between text-xs sm:text-sm text-gray-600 pl-2">
+                          <span>Add-on:</span>
+                          <span className="text-right">{directCheckout.addons.map(a => a.name).join(', ')}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
