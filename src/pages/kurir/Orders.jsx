@@ -288,13 +288,10 @@ const KurirOrders = () => {
                           {formatTime(order.guest_event_time)}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
-                          <div className="truncate" title={order.items_summary || `${order.items_count || 0} item`}>
-                            {order.items_summary || `${order.items_count || 0} item`}
-                          </div>
                           <div className="mt-2">
                             <Link
                               to={`/kurir/orders/${order.id}`}
-                              className="inline-flex items-center px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 rounded-full hover:bg-primary-100 hover:text-primary-700 transition"
+                              className="text-primary-600 hover:text-primary-700 font-semibold"
                             >
                               Lihat Detail
                             </Link>
