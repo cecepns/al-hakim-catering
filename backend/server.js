@@ -604,6 +604,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       
       // Process addons if provided
       let addonTotal = 0;
+      let addonsData = [];
       if (item.addon_ids && Array.isArray(item.addon_ids) && item.addon_ids.length > 0) {
         const placeholders = item.addon_ids.map(() => '?').join(',');
         const [addons] = await connection.query(
@@ -614,6 +615,11 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         for (const addon of addons) {
           const addonPrice = parseFloat(addon.price) || 0;
           addonTotal += addonPrice;
+          addonsData.push({
+            id: addon.id,
+            name: addon.name,
+            price: addonPrice
+          });
         }
       }
       
@@ -632,7 +638,9 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         variant_name: variant_name,
         quantity: item.quantity,
         price: basePriceWithAddons, // Price includes addons
-        subtotal: validSubtotal
+        subtotal: validSubtotal,
+        addons_json: addonsData.length > 0 ? JSON.stringify(addonsData) : null,
+        addons_price: addonTotal
       });
     }
 
@@ -739,8 +747,8 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     for (const item of orderItems) {
       await connection.query(
-        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal]
+        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal, item.addons_json, item.addons_price || 0]
       );
 
       await connection.query(
@@ -903,6 +911,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       
       // Process addons if provided
       let addonTotal = 0;
+      let addonsData = [];
       if (item.addon_ids && Array.isArray(item.addon_ids) && item.addon_ids.length > 0) {
         const placeholders = item.addon_ids.map(() => '?').join(',');
         const [addons] = await connection.query(
@@ -914,6 +923,11 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
           const addonPrice = Number(addon.price || 0);
           if (Number.isFinite(addonPrice) && addonPrice >= 0) {
             addonTotal += addonPrice;
+            addonsData.push({
+              id: addon.id,
+              name: addon.name,
+              price: addonPrice
+            });
           }
         }
       }
@@ -934,7 +948,9 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         variant_name: variant_name,
         quantity: item.quantity,
         price: basePriceWithAddons, // Price includes addons
-        subtotal: validSubtotal
+        subtotal: validSubtotal,
+        addons_json: addonsData.length > 0 ? JSON.stringify(addonsData) : null,
+        addons_price: addonTotal
       });
     }
 
@@ -1064,8 +1080,8 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     for (const item of orderItems) {
       await connection.query(
-        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal]
+        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal, item.addons_json, item.addons_price || 0]
       );
 
       await connection.query(

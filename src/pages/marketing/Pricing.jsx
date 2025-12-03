@@ -147,7 +147,7 @@ const MarketingPricing = () => {
 
         <div className="bg-white rounded-xl shadow-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <div className="flex space-x-2">
+            <div className="flex gap-4 flex-wrap">
               {categories.map((cat) => (
                 <button
                   key={cat.value}
@@ -229,7 +229,7 @@ const MarketingPricing = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-semibold text-gray-900">
-                            Rp {formatRupiah(productPrice)}
+                            <span className="text-xs text-gray-500 pr-1">Mulai</span> Rp {formatRupiah(productPrice)}
                           </div>
                           {product.discount_percentage > 0 && (
                             <div className="text-xs text-gray-400 line-through">

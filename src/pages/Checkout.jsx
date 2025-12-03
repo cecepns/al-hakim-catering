@@ -193,7 +193,9 @@ const Checkout = () => {
         product_id: product.id,
         variant_id: directCheckout?.variant_id || null,
         quantity: quantity,
-        addon_ids: directCheckout?.addon_ids || null,
+        addon_ids: (directCheckout?.addon_ids && Array.isArray(directCheckout.addon_ids) && directCheckout.addon_ids.length > 0) 
+          ? directCheckout.addon_ids 
+          : null,
       }];
       formDataToSend.append('items', JSON.stringify(items));
       formDataToSend.append('voucher_code', voucher?.code || '');

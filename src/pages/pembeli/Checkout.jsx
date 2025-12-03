@@ -197,7 +197,8 @@ const Checkout = () => {
         : cart.map(item => ({
             product_id: item.product_id,
             variant_id: item.variant_id,
-            quantity: item.quantity
+            quantity: item.quantity,
+            addon_ids: item.addon_ids || null
           }));
 
       // Prepare delivery_notes as JSON for backend
@@ -306,7 +307,7 @@ const Checkout = () => {
 
   return (
     <DashboardLayout role={user?.role || 'pembeli'}>
-      <div className="max-w-4xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
+      <div className="max-w-4xl mx-auto sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-4 sm:mb-6 text-center px-2">
           FORMAT PEMESANAN AL-HAKIM CATERING
         </h1>
@@ -580,7 +581,7 @@ const Checkout = () => {
               </div>
 
               {/* Cashback */}
-              {cashbackBalance > 0 && (
+              {cashbackBalance > 0 && user?.role !== 'marketing' && (
                 <div className="border-t pt-2">
                   <label className="block text-xs text-gray-600 mb-1">
                     Gunakan Cashback (Maks: Rp {formatRupiah(Math.min(cashbackBalance, subtotal - discount))})
