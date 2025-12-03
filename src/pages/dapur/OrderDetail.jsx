@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../../utils/api';
-import { parseDeliveryNotes } from '../../utils/formatHelper';
+import { parseDeliveryNotes, formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 
@@ -214,21 +214,57 @@ const DapurOrderDetail = () => {
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Item yang Harus Dibuat</h2>
               <div className="space-y-4">
-                {order.items?.map((item, index) => (
-                  <div key={index} className="flex items-center py-4 border-b last:border-0">
-                    <div className="flex-1">
-                      <p className="font-semibold text-gray-900 text-lg">{item.product_name}</p>
-                      {item.variant_name && (
-                        <p className="text-sm text-gray-600 mt-1">Varian: {item.variant_name}</p>
-                      )}
-                      <div className="flex items-center mt-2">
-                        <span className="bg-primary-100 text-primary-700 px-3 py-1 rounded-full text-sm font-semibold">
-                          Qty: {item.quantity}
-                        </span>
+                {order.items?.map((item, index) => {
+                  // Parse addons_json if it exists
+                  let addons = [];
+                  if (item.addons_json) {
+                    try {
+                      addons = typeof item.addons_json === 'string' 
+                        ? JSON.parse(item.addons_json) 
+                        : item.addons_json;
+                      // Ensure it's an array
+                      if (!Array.isArray(addons)) {
+                        addons = [];
+                      }
+                    } catch (error) {
+                      console.error('Error parsing addons_json:', error);
+                      addons = [];
+                    }
+                  }
+
+                  return (
+                    <div key={index} className="flex items-center py-4 border-b last:border-0">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900 text-lg">{item.product_name}</p>
+                        {item.variant_name && (
+                          <p className="text-sm text-gray-600 mt-1">Varian: {item.variant_name}</p>
+                        )}
+                        {addons.length > 0 && (
+                          <div className="mt-1">
+                            <p className="text-sm font-medium text-gray-700">Add-on:</p>
+                            <ul className="text-sm text-gray-600 ml-4 list-disc">
+                              {addons.map((addon, addonIndex) => (
+                                <li key={addonIndex}>
+                                  {addon.name || addon}
+                                  {addon.price && (
+                                    <span className="text-primary-600 ml-1">
+                                      (+Rp {formatRupiah(addon.price)})
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <div className="flex items-center mt-2">
+                          <span className="bg-primary-100 text-primary-700 px-3 py-1 rounded-full text-sm font-semibold">
+                            Qty: {item.quantity}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

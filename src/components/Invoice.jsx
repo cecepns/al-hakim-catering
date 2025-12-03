@@ -134,20 +134,56 @@ const Invoice = ({ order, items, company }) => {
             </tr>
           </thead>
           <tbody>
-            {items.map((item, index) => (
-              <tr key={index}>
-                <td className="border border-gray-300 px-4 py-3 text-gray-700">{index + 1}</td>
-                <td className="border border-gray-300 px-4 py-3 text-gray-700">
-                  {item.product_name}
-                  {item.variant_name && (
-                    <span className="text-sm text-gray-600 block">Varian: {item.variant_name}</span>
-                  )}
-                </td>
-                <td className="border border-gray-300 px-4 py-3 text-center text-gray-700">{item.quantity}</td>
-                <td className="border border-gray-300 px-4 py-3 text-right text-gray-700">Rp {formatRupiah(item.price)}</td>
-                <td className="border border-gray-300 px-4 py-3 text-right text-gray-700 font-medium">Rp {formatRupiah(item.subtotal)}</td>
-              </tr>
-            ))}
+            {items.map((item, index) => {
+              // Parse addons_json if it exists
+              let addons = [];
+              if (item.addons_json) {
+                try {
+                  addons = typeof item.addons_json === 'string' 
+                    ? JSON.parse(item.addons_json) 
+                    : item.addons_json;
+                  // Ensure it's an array
+                  if (!Array.isArray(addons)) {
+                    addons = [];
+                  }
+                } catch (error) {
+                  console.error('Error parsing addons_json:', error);
+                  addons = [];
+                }
+              }
+
+              return (
+                <tr key={index}>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">{index + 1}</td>
+                  <td className="border border-gray-300 px-4 py-3 text-gray-700">
+                    {item.product_name}
+                    {item.variant_name && (
+                      <span className="text-sm text-gray-600 block">Varian: {item.variant_name}</span>
+                    )}
+                    {addons.length > 0 && (
+                      <div className="mt-1">
+                        <span className="text-xs font-medium text-gray-600">Add-on:</span>
+                        <ul className="text-xs text-gray-600 ml-4 list-disc mt-1">
+                          {addons.map((addon, addonIndex) => (
+                            <li key={addonIndex}>
+                              {addon.name || addon}
+                              {addon.price && (
+                                <span className="text-gray-500 ml-1">
+                                  (+Rp {formatRupiah(addon.price)})
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </td>
+                  <td className="border border-gray-300 px-4 py-3 text-center text-gray-700">{item.quantity}</td>
+                  <td className="border border-gray-300 px-4 py-3 text-right text-gray-700">Rp {formatRupiah(item.price)}</td>
+                  <td className="border border-gray-300 px-4 py-3 text-right text-gray-700 font-medium">Rp {formatRupiah(item.subtotal)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
