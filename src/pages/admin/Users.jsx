@@ -7,6 +7,14 @@ const AdminUsers = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    totalPages: 1,
+  });
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -20,15 +28,34 @@ const AdminUsers = () => {
   });
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const ITEMS_PER_PAGE = 10;
 
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await userAPI.getAll();
-      setUsers(response.data);
+      const params = {
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+      };
+
+      if (filter && filter !== 'all') {
+        params.role = filter;
+      }
+
+      if (searchQuery.trim()) {
+        params.search = searchQuery.trim();
+      }
+
+      const response = await userAPI.getAll(params);
+      setUsers(response.data.data || []);
+      setPagination(
+        response.data.pagination || {
+          total: 0,
+          page: 1,
+          limit: ITEMS_PER_PAGE,
+          totalPages: 1,
+        }
+      );
     } catch (error) {
       console.error('Error fetching users:', error);
       alert('Gagal memuat data users');
@@ -36,6 +63,11 @@ const AdminUsers = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, currentPage, searchQuery]);
 
   const handleRoleChange = async (userId, newRole) => {
     if (!window.confirm(`Yakin ingin mengubah role user ini menjadi ${newRole}?`)) return;
@@ -151,7 +183,10 @@ const AdminUsers = () => {
     return colors[role] || 'bg-gray-100 text-gray-800';
   };
 
-  const filteredUsers = filter === 'all' ? users : users.filter((u) => u.role === filter);
+  const totalUsers = pagination.total || 0;
+  const totalPages = pagination.totalPages || 1;
+  const safeCurrentPage = pagination.page || 1;
+  const startIndex = (safeCurrentPage - 1) * pagination.limit;
 
   const roles = [
     { value: 'all', label: 'Semua' },
@@ -192,12 +227,15 @@ const AdminUsers = () => {
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
             <div className="flex space-x-2 overflow-x-auto">
               {roles.map((role) => (
                 <button
                   key={role.value}
-                  onClick={() => setFilter(role.value)}
+                  onClick={() => {
+                    setFilter(role.value);
+                    setCurrentPage(1);
+                  }}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
                     filter === role.value
                       ? 'bg-primary-600 text-white'
@@ -208,13 +246,25 @@ const AdminUsers = () => {
                 </button>
               ))}
             </div>
+            <div className="w-full md:w-64">
+              <input
+                type="text"
+                placeholder="Cari nama, email, atau telepon..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              />
+            </div>
           </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
             </div>
-          ) : filteredUsers.length === 0 ? (
+          ) : users.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-600">Tidak ada pengguna</p>
             </div>
@@ -250,7 +300,7 @@ const AdminUsers = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredUsers.map((user) => (
+                  {users.map((user) => (
                     <tr key={user.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {user.name}
@@ -349,6 +399,35 @@ const AdminUsers = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && users.length > 0 && (
+            <div className="mt-6 flex items-center justify-between flex-wrap gap-3">
+              <div className="text-sm text-gray-700">
+                Menampilkan {startIndex + 1} -{' '}
+                {Math.min(startIndex + (pagination.limit || ITEMS_PER_PAGE), totalUsers)} dari {totalUsers} pengguna
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={safeCurrentPage === 1}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Sebelumnya
+                  </button>
+                  <span className="text-sm text-gray-700">
+                    Halaman {safeCurrentPage} dari {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={safeCurrentPage === totalPages}
+                    className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Selanjutnya
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

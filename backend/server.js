@@ -2872,11 +2872,58 @@ app.delete('/api/cart/:id', authenticateToken, async (req, res) => {
 
 app.get('/api/users', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
+    const { page = 1, limit = 10, search, role } = req.query;
+
+    const pageInt = parseInt(page, 10) || 1;
+    const limitInt = Math.min(parseInt(limit, 10) || 10, 10); // Max 10 per page
+    const offset = (pageInt - 1) * limitInt;
+
+    const whereClauses = [];
+    const params = [];
+
+    if (role && role !== 'all') {
+      whereClauses.push('role = ?');
+      params.push(role);
+    }
+
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereClauses.push(`(
+        name LIKE ? OR
+        email LIKE ? OR
+        phone LIKE ?
+      )`);
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+
+    // Count total users
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) as total FROM users ${whereSql}`,
+      params
+    );
+    const total = countRows[0]?.total || 0;
+
+    // Fetch paginated users
     const [users] = await pool.query(
-      'SELECT id, name, email, phone, address, role, cashback_balance, is_active, created_at FROM users ORDER BY created_at DESC'
+      `SELECT id, name, email, phone, address, role, cashback_balance, is_active, created_at 
+       FROM users 
+       ${whereSql}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limitInt, offset]
     );
 
-    res.json(users);
+    res.json({
+      data: users,
+      pagination: {
+        total,
+        page: pageInt,
+        limit: limitInt,
+        totalPages: limitInt > 0 ? Math.max(1, Math.ceil(total / limitInt)) : 1,
+      },
+    });
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
