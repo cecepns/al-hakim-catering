@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -8,15 +9,51 @@ const PembeliOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    limit: 10,
+    totalPages: 1,
+  });
+  const debounceTimer = useRef(null);
+  const ITEMS_PER_PAGE = 10;
 
-  const fetchOrders = async () => {
+  // Debounce search query
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setCurrentPage(1); // Reset to first page on search
+    }, 1000);
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [searchQuery]);
+
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       
       if (filter === 'review') {
-        // Fetch all completed orders
-        const response = await orderAPI.getAll({ status: 'selesai' });
-        const completedOrders = response.data || [];
+        // Fetch all completed orders (with pagination and search)
+        const params = {
+          status: 'selesai',
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+        };
+        if (debouncedSearch.trim()) {
+          params.search = debouncedSearch.trim();
+        }
+        const response = await orderAPI.getAll(params);
+        const completedOrders = response.data?.data || [];
         
         // Check which orders have reviews
         const reviewedOrderIds = new Set();
@@ -34,22 +71,44 @@ const PembeliOrders = () => {
         // Show only orders that can be reviewed (selesai and no review)
         const ordersData = completedOrders.filter(order => !reviewedOrderIds.has(order.id));
         setOrders(ordersData);
+        // Use total from response but adjust for filtered orders
+        const total = response.data?.pagination?.total || 0;
+        setPagination({
+          total: total - reviewedOrderIds.size, // Approximate, actual would require fetching all
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+          totalPages: Math.ceil(ordersData.length / ITEMS_PER_PAGE) || 1,
+        });
       } else {
-        const params = filter !== 'all' ? { status: filter } : {};
+        const params = {
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+        };
+        if (filter !== 'all') {
+          params.status = filter;
+        }
+        if (debouncedSearch.trim()) {
+          params.search = debouncedSearch.trim();
+        }
         const response = await orderAPI.getAll(params);
-        setOrders(response.data);
+        setOrders(response.data.data || []);
+        setPagination(response.data.pagination || {
+          total: 0,
+          page: 1,
+          limit: ITEMS_PER_PAGE,
+          totalPages: 1,
+        });
       }
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter, currentPage, debouncedSearch]);
 
   useEffect(() => {
     fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [fetchOrders]);
 
   const getStatusColor = (status) => {
     const colors = {
@@ -77,12 +136,35 @@ const PembeliOrders = () => {
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Pesanan Saya</h1>
 
         <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex space-x-2 mb-6 overflow-x-auto">
-            {statuses.map((status) => (
-              <button key={status.value} onClick={() => setFilter(status.value)} className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${filter === status.value ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                {status.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+            <div className="flex space-x-2 overflow-x-auto">
+              {statuses.map((status) => (
+                <button
+                  key={status.value}
+                  onClick={() => {
+                    setFilter(status.value);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                    filter === status.value
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+              <input
+                type="text"
+                placeholder="Cari pesanan..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
           </div>
 
           {loading ? (
@@ -119,6 +201,34 @@ const PembeliOrders = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {!loading && pagination.totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Menampilkan {((pagination.page - 1) * pagination.limit) + 1} -{' '}
+                {Math.min(pagination.page * pagination.limit, pagination.total)} dari {pagination.total} pesanan
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  disabled={pagination.page === 1}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Sebelumnya
+                </button>
+                <span className="px-4 py-2 text-gray-700">
+                  Halaman {pagination.page} dari {pagination.totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.min(pagination.totalPages, prev + 1))}
+                  disabled={pagination.page === pagination.totalPages}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Selanjutnya
+                </button>
+              </div>
             </div>
           )}
         </div>

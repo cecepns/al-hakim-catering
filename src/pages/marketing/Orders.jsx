@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { commissionAPI, orderAPI } from '../../utils/api';
 import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
@@ -25,8 +26,27 @@ const MarketingOrders = () => {
     limit: 10,
     totalPages: 1,
   });
-
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceTimer = useRef(null);
   const ITEMS_PER_PAGE = 10;
+
+  // Debounce search query
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    debounceTimer.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setCurrentPage(1); // Reset to first page on search
+    }, 1000);
+
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [searchQuery]);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -38,6 +58,10 @@ const MarketingOrders = () => {
 
       if (filter !== 'all') {
         params.status = filter;
+      }
+
+      if (debouncedSearch.trim()) {
+        params.search = debouncedSearch.trim();
       }
 
       const response = await commissionAPI.getOrders(params);
@@ -53,7 +77,7 @@ const MarketingOrders = () => {
     } finally {
       setLoading(false);
     }
-  }, [filter, currentPage]);
+  }, [filter, currentPage, debouncedSearch]);
 
   const fetchCommissionStats = useCallback(async () => {
     try {
@@ -145,23 +169,35 @@ const MarketingOrders = () => {
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex space-x-2 mb-6 overflow-x-auto">
-            {statuses.map((status) => (
-              <button
-                key={status.value}
-                onClick={() => {
-                  setFilter(status.value);
-                  setCurrentPage(1);
-                }}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
-                  filter === status.value
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {status.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+            <div className="flex space-x-2 overflow-x-auto">
+              {statuses.map((status) => (
+                <button
+                  key={status.value}
+                  onClick={() => {
+                    setFilter(status.value);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                    filter === status.value
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {status.label}
+                </button>
+              ))}
+            </div>
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+              <input
+                type="text"
+                placeholder="Cari pesanan..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
           </div>
 
           {loading ? (

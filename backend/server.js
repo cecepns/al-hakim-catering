@@ -375,7 +375,13 @@ app.delete('/api/products/:id', authenticateToken, authorizeRole('admin'), async
 
 app.get('/api/orders', authenticateToken, async (req, res) => {
   try {
-    let query = `
+    const { status, page = 1, limit = 10, search, role } = req.query;
+    const pageInt = parseInt(page, 10) || 1;
+    const limitInt = Math.min(parseInt(limit, 10) || 10, 10); // Max 10 per page
+    const offset = (pageInt - 1) * limitInt;
+
+    // Base query components
+    const baseSelect = `
       SELECT o.*, 
         COALESCE(o.guest_customer_name, u.name) as customer_name, 
         u.email as customer_email, 
@@ -413,41 +419,92 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE 1=1
     `;
-    const params = [];
+    
+    let baseParams = [];
+    let whereClauses = [];
 
+    // Role-based filtering
     if (req.user.role === 'pembeli') {
-      query += ' AND o.user_id = ?';
-      params.push(req.user.id);
+      whereClauses.push('o.user_id = ?');
+      baseParams.push(req.user.id);
     } else if (req.user.role === 'marketing') {
-      query += ' AND o.marketing_id = ?';
-      params.push(req.user.id);
+      whereClauses.push('o.marketing_id = ?');
+      baseParams.push(req.user.id);
     }
 
-    // Support comma-separated status values
-    if (req.query.status) {
-      const statuses = req.query.status.split(',').map(s => s.trim());
-      if (statuses.length === 1) {
-        query += ' AND o.status = ?';
-        params.push(statuses[0]);
-      } else {
-        query += ` AND o.status IN (${statuses.map(() => '?').join(',')})`;
-        params.push(...statuses);
+    // Role parameter filtering for dapur, kurir, operasional
+    if (role) {
+      if (role === 'dapur') {
+        // Dapur sees orders that need processing: dibuat, diproses
+        whereClauses.push('o.status IN (?, ?)');
+        baseParams.push('dibuat', 'diproses');
+      } else if (role === 'kurir') {
+        // Kurir sees orders ready to ship: siap-kirim, dikirim
+        whereClauses.push('o.status IN (?, ?)');
+        baseParams.push('siap-kirim', 'dikirim');
+      } else if (role === 'operasional') {
+        // Operasional sees all orders (admin-like view)
+        // No additional filter needed
       }
     }
 
-    // Group by order fields for aggregation
-    query += ' GROUP BY o.id';
-
-    // Order by: pinned first, then by created_at DESC
-    query += ' ORDER BY o.is_pinned DESC, o.created_at DESC';
-
-    if (req.query.limit) {
-      query += ' LIMIT ?';
-      params.push(parseInt(req.query.limit));
+    // Status filtering
+    if (status && status !== 'all') {
+      const statuses = status.split(',').map(s => s.trim());
+      if (statuses.length === 1) {
+        whereClauses.push('o.status = ?');
+        baseParams.push(statuses[0]);
+      } else {
+        whereClauses.push(`o.status IN (${statuses.map(() => '?').join(',')})`);
+        baseParams.push(...statuses);
+      }
     }
 
-    const [orders] = await pool.query(query, params);
-    res.json(orders);
+    // Search functionality
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereClauses.push(`(
+        o.id LIKE ? OR
+        COALESCE(o.guest_customer_name, u.name) LIKE ? OR
+        u.email LIKE ? OR
+        COALESCE(o.guest_wa_number_1, u.phone) LIKE ? OR
+        o.guest_wa_number_2 LIKE ? OR
+        o.delivery_address LIKE ? OR
+        o.guest_event_date LIKE ?
+      )`);
+      baseParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereClauses.length > 0 ? ' AND ' + whereClauses.join(' AND ') : '';
+
+    // Count query
+    const countQuery = `
+      SELECT COUNT(DISTINCT o.id) as total
+      FROM orders o
+      JOIN users u ON o.user_id = u.id
+      LEFT JOIN order_items oi ON o.id = oi.order_id
+      LEFT JOIN products p ON oi.product_id = p.id
+      WHERE 1=1${whereClause}
+    `;
+    
+    const [countRows] = await pool.query(countQuery, baseParams);
+    const total = countRows[0]?.total || 0;
+
+    // Data query with pagination
+    let dataQuery = baseSelect + whereClause + ' GROUP BY o.id ORDER BY o.is_pinned DESC, o.created_at DESC LIMIT ? OFFSET ?';
+    
+    const dataParams = [...baseParams, limitInt, offset];
+    const [orders] = await pool.query(dataQuery, dataParams);
+
+    res.json({
+      data: orders,
+      pagination: {
+        total,
+        page: pageInt,
+        limit: limitInt,
+        totalPages: limitInt > 0 ? Math.max(1, Math.ceil(total / limitInt)) : 1
+      }
+    });
   } catch (error) {
     console.error('Get orders error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
@@ -2047,27 +2104,48 @@ app.get('/api/commission/history', authenticateToken, authorizeRole('marketing')
 
 app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
-    const { status, page = 1, limit = 10 } = req.query;
+    const { status, page = 1, limit = 10, search } = req.query;
 
     const pageInt = parseInt(page, 10) || 1;
-    const limitInt = parseInt(limit, 10) || 10;
+    const limitInt = Math.min(parseInt(limit, 10) || 10, 10); // Max 10 per page
     const offset = (pageInt - 1) * limitInt;
 
     // Base WHERE params (shared between count & data queries)
     const baseParams = [req.user.id];
-    const whereStatusClause = (status && status !== 'all') ? ' AND c.status = ?' : '';
+    let whereClauses = [];
+    
     if (status && status !== 'all') {
+      whereClauses.push('c.status = ?');
       baseParams.push(status);
     }
 
-    // Get total count of distinct orders for this marketing (with optional status filter)
+    // Search functionality
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereClauses.push(`(
+        o.id LIKE ? OR
+        COALESCE(o.guest_customer_name, u.name) LIKE ? OR
+        u.email LIKE ? OR
+        COALESCE(o.guest_wa_number_1, u.phone) LIKE ? OR
+        o.delivery_address LIKE ? OR
+        o.guest_event_date LIKE ?
+      )`);
+      baseParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+
+    const additionalWhereClause = whereClauses.length > 0
+      ? ' AND ' + whereClauses.join(' AND ')
+      : '';
+
+    // Get total count of distinct orders for this marketing (with optional status filter and search)
     const countQuery = `
       SELECT COUNT(DISTINCT o.id) as total
       FROM orders o
       LEFT JOIN commissions c ON o.id = c.order_id
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN products p ON oi.product_id = p.id
-      WHERE o.marketing_id = ?${whereStatusClause}
+      JOIN users u ON o.user_id = u.id
+      WHERE o.marketing_id = ?${additionalWhereClause}
     `;
     const [countRows] = await pool.query(countQuery, baseParams);
     const total = countRows[0]?.total || 0;
@@ -2087,7 +2165,8 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
       LEFT JOIN commissions c ON o.id = c.order_id
       LEFT JOIN order_items oi ON o.id = oi.order_id
       LEFT JOIN products p ON oi.product_id = p.id
-      WHERE o.marketing_id = ?${whereStatusClause}
+      JOIN users u ON o.user_id = u.id
+      WHERE o.marketing_id = ?${additionalWhereClause}
     `;
 
     // Group by order id because we use aggregation (GROUP_CONCAT)
