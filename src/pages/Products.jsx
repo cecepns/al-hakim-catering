@@ -206,7 +206,7 @@ const Products = () => {
                     alt={product.name}
                     className="w-full h-48 object-cover"
                   />
-                  {product.is_promo && product.discount_percentage > 0 && (
+                  {!!product.is_promo && !!product.discount_percentage > 0 && (
                     <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
                       -{product.discount_percentage}%
                     </div>

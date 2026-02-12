@@ -27,6 +27,7 @@ import AdminReviews from './pages/admin/Reviews';
 import AdminChecklist from './pages/admin/Checklist';
 import AdminCommissionWithdrawals from './pages/admin/CommissionWithdrawals';
 import CashFlow from './pages/admin/CashFlow';
+import AdminCart from './pages/admin/Cart';
 
 // Pembeli Pages
 import PembeliDashboard from './pages/pembeli/Dashboard';
@@ -43,6 +44,7 @@ import MarketingPricing from './pages/marketing/Pricing';
 import MarketingOrders from './pages/marketing/Orders';
 import MarketingOrderDetail from './pages/marketing/OrderDetail';
 import MarketingCommission from './pages/marketing/Commission';
+import MarketingCart from './pages/marketing/Cart';
 
 // Operasional Pages
 import OperasionalDashboard from './pages/operasional/Dashboard';
@@ -209,6 +211,14 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/cart"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminCart />
+          </ProtectedRoute>
+        }
+      />
 
       {/* Pembeli Routes - Tanpa Navbar & Footer */}
       <Route
@@ -306,6 +316,14 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['marketing']}>
             <MarketingCommission />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/marketing/cart"
+        element={
+          <ProtectedRoute allowedRoles={['marketing']}>
+            <MarketingCart />
           </ProtectedRoute>
         }
       />

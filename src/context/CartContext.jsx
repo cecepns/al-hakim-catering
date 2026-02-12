@@ -15,6 +15,13 @@ export const CartProvider = ({ children }) => {
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // Helper to safely convert any harga (string/number) ke number
+  const toNumber = (value) => {
+    if (value === null || value === undefined) return 0;
+    const num = Number(value);
+    return Number.isNaN(num) ? 0 : num;
+  };
+
   const fetchCart = async () => {
     try {
       setLoading(true);
@@ -65,9 +72,15 @@ export const CartProvider = ({ children }) => {
 
   const getCartTotal = () => {
     return cart.reduce((total, item) => {
-      // Use total_price if available (includes variant + addon), otherwise calculate from price
-      const itemTotal = item.total_price || ((item.discounted_price || item.price) * item.quantity);
-      return total + itemTotal;
+      // Gunakan total_price jika tersedia (sudah termasuk variant + addon)
+      if (item.total_price !== null && item.total_price !== undefined) {
+        return total + toNumber(item.total_price);
+      }
+
+      // Jika tidak ada total_price, hitung dari harga dasar * quantity
+      const basePrice = toNumber(item.discounted_price || item.price);
+      const qty = toNumber(item.quantity || 1);
+      return total + basePrice * qty;
     }, 0);
   };
 

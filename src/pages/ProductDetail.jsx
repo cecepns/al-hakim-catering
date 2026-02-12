@@ -65,8 +65,10 @@ const ProductDetail = () => {
       return;
     }
 
-    if (user.role !== "pembeli") {
-      toast.error("Fitur keranjang hanya tersedia untuk pembeli. Gunakan 'Beli Sekarang' untuk membeli.");
+    // Izinkan beberapa role menggunakan keranjang
+    const allowedRolesForCart = ["pembeli", "admin", "marketing"];
+    if (!allowedRolesForCart.includes(user.role)) {
+      toast.error("Anda tidak memiliki akses untuk menggunakan keranjang. Gunakan 'Beli Sekarang' untuk melakukan pembelian.");
       return;
     }
 
@@ -83,7 +85,13 @@ const ProductDetail = () => {
       });
       toast.success("Produk berhasil ditambahkan ke keranjang!");
       setTimeout(() => {
-        navigate("/pembeli/cart");
+        const cartPath =
+          user.role === "admin"
+            ? "/admin/cart"
+            : user.role === "marketing"
+            ? "/marketing/cart"
+            : "/pembeli/cart";
+        navigate(cartPath);
       }, 1000);
     } catch (err) {
       console.error("Error adding to cart:", err);
@@ -349,7 +357,7 @@ const ProductDetail = () => {
                 <span className="text-sm font-medium text-primary-600 uppercase">
                   {product.category}
                 </span>
-                {product.is_promo && product.discount_percentage > 0 && (
+                {!!product.is_promo && !!product.discount_percentage > 0 && (
                   <span className="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold">
                     Diskon {product.discount_percentage}%
                   </span>

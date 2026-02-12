@@ -5,6 +5,7 @@ import { X, Plus } from 'lucide-react';
 import { productAPI } from '../../utils/api';
 import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
+import imageCompression from 'browser-image-compression';
 
 const ProductForm = () => {
   const navigate = useNavigate();
@@ -109,9 +110,42 @@ const ProductForm = () => {
     }));
   };
 
-  const handleImageChange = (e) => {
+  // Compress image files before adding to state (max ~700KB)
+  const handleImageChange = async (e) => {
     const files = Array.from(e.target.files || []);
-    setNewImages((prev) => [...prev, ...files]);
+    if (files.length === 0) return;
+
+    try {
+      // Opsi kompresi: target ukuran maks 0.7 MB per file
+      const options = {
+        maxSizeMB: 0.7,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+      };
+
+      const compressedFiles = [];
+      for (const file of files) {
+        // Hanya kompres jika file > ~700KB
+        if (file.size / 1024 > 700) {
+          const compressed = await imageCompression(file, options);
+          // Pertahankan nama file asli
+          const finalFile = new File([compressed], file.name, {
+            type: compressed.type || file.type,
+            lastModified: Date.now(),
+          });
+          compressedFiles.push(finalFile);
+        } else {
+          compressedFiles.push(file);
+        }
+      }
+
+      setNewImages((prev) => [...prev, ...compressedFiles]);
+      toast.success('Gambar berhasil dikompres sebelum upload');
+    } catch (error) {
+      console.error('Error compressing images:', error);
+      toast.error('Gagal mengompres gambar, menggunakan file asli');
+      setNewImages((prev) => [...prev, ...files]);
+    }
   };
 
   // ==================== BASIC INFO SECTION ====================

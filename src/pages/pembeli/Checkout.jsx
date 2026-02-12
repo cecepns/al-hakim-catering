@@ -274,8 +274,17 @@ const Checkout = () => {
       }
       
       toast.success('Pesanan berhasil dibuat!');
+
+      // Arahkan ke halaman pesanan sesuai role
+      const targetOrdersPath =
+        user?.role === 'admin'
+          ? '/admin/orders'
+          : user?.role === 'marketing'
+          ? '/marketing/orders'
+          : '/pembeli/orders';
+
       setTimeout(() => {
-        navigate('/pembeli/orders');
+        navigate(targetOrdersPath);
       }, 2000);
     } catch (error) {
       console.error('Error creating order:', error);
@@ -529,17 +538,21 @@ const Checkout = () => {
               <div className="space-y-3">
                 {currentItems.map((item, index) => {
                   const itemKey = directCheckout ? `direct-${index}` : item.id;
-                  const itemPrice = directCheckout 
-                    ? item.total_price 
-                    : (item.discounted_price || item.price) * item.quantity;
-                  
+                  // Selalu gunakan total_price jika tersedia (sudah termasuk diskon & addon),
+                  // jika tidak ada, hitung dari harga dasar * quantity
+                  const itemPrice =
+                    item.total_price ||
+                    ((item.discounted_price || item.price) * item.quantity);
+
                   return (
                     <div key={itemKey} className="space-y-1">
                       <div className="flex justify-between text-xs sm:text-sm">
                         <span className="break-words pr-2 font-medium">
                           {item.name} x{item.quantity}
                         </span>
-                        <span className="text-right break-words font-semibold">Rp {formatRupiah(itemPrice)}</span>
+                        <span className="text-right break-words font-semibold">
+                          Rp {formatRupiah(itemPrice)}
+                        </span>
                       </div>
                       {item.variant_name && (
                         <div className="flex justify-between text-xs sm:text-sm text-gray-600 pl-2">

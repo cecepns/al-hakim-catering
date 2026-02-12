@@ -22,7 +22,15 @@ const PembeliDashboard = () => {
         orderAPI.getAll({ limit: 5 }),
         cashbackAPI.getBalance(),
       ]);
-      setOrders(ordersRes.data);
+
+      // Normalize orders response to always be an array
+      const ordersData = Array.isArray(ordersRes.data?.data)
+        ? ordersRes.data.data
+        : Array.isArray(ordersRes.data)
+        ? ordersRes.data
+        : [];
+
+      setOrders(ordersData);
       setCashback(cashbackRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
