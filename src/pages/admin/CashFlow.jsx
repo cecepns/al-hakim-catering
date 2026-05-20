@@ -125,7 +125,7 @@ const CashFlow = () => {
       description: transaction.description || '',
       proof: null
     });
-    setProofPreview(transaction.proof_image_url ? `https://api-inventory.isavralabel.com/al-hakim${transaction.proof_image_url}` : null);
+    setProofPreview(transaction.proof_image_url ? `https://api.kingcreativestudio.my.id/al-hakim${transaction.proof_image_url}` : null);
     setModalOpen(true);
   };
 
@@ -459,7 +459,7 @@ const CashFlow = () => {
                           {transaction.proof_image_url ? (
                             <button
                               onClick={() => {
-                                setViewingImage(`https://api-inventory.isavralabel.com/al-hakim${transaction.proof_image_url}`);
+                                setViewingImage(`https://api.kingcreativestudio.my.id/al-hakim${transaction.proof_image_url}`);
                                 setImageViewerOpen(true);
                               }}
                               className="text-primary-600 hover:text-primary-900"

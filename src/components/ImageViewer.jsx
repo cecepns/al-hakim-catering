@@ -28,7 +28,7 @@ const ImageViewer = ({ imageUrl, isOpen, onClose, title = 'Bukti Foto' }) => {
       return imageUrl;
     }
     // If relative path, prepend API base URL (without /api)
-    const API_BASE_URL = 'https://api-inventory.isavralabel.com/al-hakim';
+    const API_BASE_URL = 'https://api.kingcreativestudio.my.id/al-hakim';
     return `${API_BASE_URL}${imageUrl}`;
   };
 

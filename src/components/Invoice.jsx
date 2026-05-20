@@ -15,7 +15,7 @@ const Invoice = ({ order, items, company }) => {
             <img
               src={
                 company.company_logo_url
-                  ? `https://api-inventory.isavralabel.com/al-hakim${company.company_logo_url}`
+                  ? `https://api.kingcreativestudio.my.id/al-hakim${company.company_logo_url}`
                   : headerInvoice
               }
               alt="Logo"
