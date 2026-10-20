@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // const API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE_URL = 'https://api.kingcreativestudio.my.id/al-hakim/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://api.kingcreativestudio.my.id/al-hakim/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -208,4 +208,60 @@ export const adminChecklistAPI = {
   save: (date, data) => api.post(`/admin/checklist/${date}`, data),
 };
 
+export const neracaAPI = {
+  getAccounts: () => api.get('/neraca/accounts'),
+  getSummary: (params) => api.get('/neraca/summary', { params }),
+  getJournal: (params) => api.get('/neraca/journal', { params }),
+  createJournal: (data) => api.post('/neraca/journal', data),
+};
+
+export const inventoryAPI = {
+  getCategories: () => api.get('/inventory/categories'),
+  getItems: (params) => api.get('/inventory/items', { params }),
+  createItem: (data) => api.post('/inventory/items', data),
+  updateItem: (id, data) => api.put(`/inventory/items/${id}`, data),
+  deleteItem: (id) => api.delete(`/inventory/items/${id}`),
+  getStockLogs: (params) => api.get('/inventory/stock-logs', { params }),
+  adjustStock: (data) => api.post('/inventory/stock-logs/adjust', data),
+  getOpname: (params) => api.get('/inventory/opname', { params }),
+  createOpname: (data) => api.post('/inventory/opname', data),
+};
+
+export const purchaseRequestAPI = {
+  getAll: (params) => api.get('/purchase-requests', { params }),
+  getById: (id) => api.get(`/purchase-requests/${id}`),
+  create: (data) => api.post('/purchase-requests', data),
+  update: (id, data) => api.put(`/purchase-requests/${id}`, data),
+  updateApproval: (id, data) => api.put(`/purchase-requests/${id}/approval`, data),
+  updateReceipt: (id, data) => api.put(`/purchase-requests/${id}/receipt`, data),
+  delete: (id) => api.delete(`/purchase-requests/${id}`),
+};
+
+export const purchaseAPI = {
+  getAll: (params) => api.get('/purchases', { params }),
+  getById: (id) => api.get(`/purchases/${id}`),
+  create: (formData) => api.post('/purchases', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  update: (id, data) => api.put(`/purchases/${id}`, data),
+  payRemaining: (id) => api.post(`/purchases/${id}/pay-remaining`),
+  delete: (id) => api.delete(`/purchases/${id}`),
+};
+
+export const orderCostsAPI = {
+  getCosts: (orderId) => api.get(`/orders/${orderId}/costs`),
+  addCost: (orderId, formData) => api.post(`/orders/${orderId}/costs`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  deleteCost: (orderId, costId) => api.delete(`/orders/${orderId}/costs/${costId}`),
+  getMaterials: (orderId) => api.get(`/orders/${orderId}/materials`),
+  addMaterial: (orderId, data) => api.post(`/orders/${orderId}/materials`, data),
+  deleteMaterial: (orderId, materialId) => api.delete(`/orders/${orderId}/materials/${materialId}`),
+};
+
+export const labaRugiAPI = {
+  getSummary: (params) => api.get('/laba-rugi/summary', { params }),
+};
+
 export default api;
+

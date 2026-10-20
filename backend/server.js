@@ -8,12 +8,13 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
-const app = express();
+
+const app = express.Router();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
-app.use(express.json());
-app.use('/uploads', express.static('uploads'));
+// app.use(cors());
+// app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads-alhakim-catering')));
 
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
@@ -31,14 +32,469 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'al_hakim_catering',
+  host: "localhost",
+  user: "kinq6231_alhakim",
+  password: "kinq6231_alhakim",
+  database: "kinq6231_alhakim",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
+
+
+// ========================================
+// FINANCIAL & ACCOUNTING HELPER FUNCTIONS
+// ========================================
+
+/**
+ * 1. Otomatisasi Penjualan Pesanan ke Neraca & Arus Kas
+ * Halaman 3 & 4 PDF:
+ * A. DP:
+ *    Debit: Kas (nominal DP)
+ *    Debit: Piutang Usaha (sisa pembayaran)
+ *    Kredit: Pendapatan Penjualan (total order)
+ *    Arus Kas: Operasi -> Penjualan (uang DP yang benar-benar diterima)
+ * B. COD / Transfer / Tunai:
+ *    Debit: Kas (total pembayaran)
+ *    Kredit: Pendapatan Penjualan (total order)
+ *    Arus Kas: Operasi -> Penjualan (total pembayaran)
+ */
+async function recordOrderSalesFinancials(connection, orderId, paymentMethod, paymentAmount, finalAmount, userId) {
+  try {
+    const finalTotal = parseFloat(finalAmount) || 0;
+    if (finalTotal <= 0) return;
+
+    const normalizedMethod = (paymentMethod || 'transfer').toLowerCase();
+
+    // Check if journal entry already recorded for this order to prevent duplicate
+    const [existing] = await connection.query(
+      'SELECT id FROM accounting_journal_entries WHERE reference_type = "order" AND reference_id = ? AND description LIKE "Penjualan pesanan%"',
+      [orderId]
+    );
+    if (existing.length > 0) {
+      return;
+    }
+
+    if (normalizedMethod === 'dp') {
+      const nominalDp = parseFloat(paymentAmount) > 0 ? parseFloat(paymentAmount) : (finalTotal * 0.5);
+      const sisaPembayaran = Math.max(0, finalTotal - nominalDp);
+
+      // 1. Neraca: Debit Kas (DP), Debit Piutang Usaha (Sisa), Kredit Pendapatan Penjualan (Total)
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'order', ?, ?, 'Kas', 'Pendapatan Penjualan', ?, ?)`,
+        [orderId, `Penjualan pesanan DP #${orderId} (Uang Muka)`, nominalDp, userId || null]
+      );
+
+      if (sisaPembayaran > 0) {
+        await connection.query(
+          `INSERT INTO accounting_journal_entries 
+           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+           VALUES (CURRENT_DATE, 'order', ?, ?, 'Piutang Usaha', 'Pendapatan Penjualan', ?, ?)`,
+          [orderId, `Penjualan pesanan DP #${orderId} (Sisa Piutang Usaha)`, sisaPembayaran, userId || null]
+        );
+      }
+
+      // 2. Arus Kas: Operasi -> Penjualan (Hanya uang DP yang diterima)
+      const [cfRes] = await connection.query(
+        `INSERT INTO cash_flow_transactions 
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+         VALUES ('income', 'operasi', 'Penjualan', 'Kas', 'Pendapatan Penjualan', ?, ?, ?, ?)`,
+        [nominalDp, `Penerimaan DP pesanan #${orderId}`, orderId, userId || null]
+      );
+
+      await connection.query(
+        `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Pendapatan Penjualan', 'created')`,
+        [cfRes.insertId, userId || null, nominalDp, `Penerimaan DP pesanan #${orderId}`]
+      );
+    } else {
+      // COD, Transfer, Tunai
+      // 1. Neraca: Debit Kas, Kredit Pendapatan Penjualan
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'order', ?, ?, 'Kas', 'Pendapatan Penjualan', ?, ?)`,
+        [orderId, `Penjualan pesanan #${orderId} (${normalizedMethod.toUpperCase()})`, finalTotal, userId || null]
+      );
+
+      // 2. Arus Kas: Operasi -> Penjualan
+      const [cfRes] = await connection.query(
+        `INSERT INTO cash_flow_transactions 
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+         VALUES ('income', 'operasi', 'Penjualan', 'Kas', 'Pendapatan Penjualan', ?, ?, ?, ?)`,
+        [finalTotal, `Penerimaan pembayaran pesanan #${orderId} (${normalizedMethod.toUpperCase()})`, orderId, userId || null]
+      );
+
+      await connection.query(
+        `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Pendapatan Penjualan', 'created')`,
+        [cfRes.insertId, userId || null, finalTotal, `Penerimaan pembayaran pesanan #${orderId} (${normalizedMethod.toUpperCase()})`]
+      );
+    }
+  } catch (error) {
+    console.error('recordOrderSalesFinancials error:', error);
+  }
+}
+
+/**
+ * 2. Pelunasan DP Pesanan
+ * Halaman 4 PDF:
+ * Pelunasan DP: Debit Kas/Bank, Kredit Piutang Usaha. Pendapatan tidak dicatat ulang.
+ * Arus Kas: Operasi -> Penjualan (sebesar sisa pelunasan)
+ */
+async function recordOrderDpSettlement(connection, orderId, sisaAmount, userId) {
+  try {
+    const amount = parseFloat(sisaAmount) || 0;
+    if (amount <= 0) return;
+
+    // Check if pelunasan already recorded
+    const [existing] = await connection.query(
+      'SELECT id FROM accounting_journal_entries WHERE reference_type = "order" AND reference_id = ? AND description LIKE "Pelunasan DP%"',
+      [orderId]
+    );
+    if (existing.length > 0) {
+      return;
+    }
+
+    // 1. Neraca: Debit Kas, Kredit Piutang Usaha
+    await connection.query(
+      `INSERT INTO accounting_journal_entries 
+       (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+       VALUES (CURRENT_DATE, 'order', ?, ?, 'Kas', 'Piutang Usaha', ?, ?)`,
+      [orderId, `Pelunasan DP pesanan #${orderId}`, amount, userId || null]
+    );
+
+    // 2. Arus Kas: Operasi -> Penjualan (Kas masuk sisa pembayaran)
+    const [cfRes] = await connection.query(
+      `INSERT INTO cash_flow_transactions 
+       (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+       VALUES ('income', 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', ?, ?, ?, ?)`,
+      [amount, `Pelunasan DP pesanan #${orderId}`, orderId, userId || null]
+    );
+
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+       VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', 'created')`,
+      [cfRes.insertId, userId || null, amount, `Pelunasan DP pesanan #${orderId}`]
+    );
+  } catch (error) {
+    console.error('recordOrderDpSettlement error:', error);
+  }
+}
+
+/**
+ * 3. Pembatalan Transaksi Penjualan
+ * Halaman 9 & 10 PDF:
+ * Pembayaran dikembalikan:
+ * - Neraca: Debit: Pembatalan penjualan, Kredit: Kas
+ * - Arus Kas: Operasi -> Penjualan (Kas keluar sesuai nominal pengembalian)
+ * Pembayaran tidak dikembalikan: Tidak ada transaksi baru
+ */
+async function recordOrderCancellationFinancials(connection, orderId, refundAmount, refundNotes, userId) {
+  try {
+    const refund = parseFloat(refundAmount) || 0;
+    if (refund <= 0) return;
+
+    // Check if cancellation refund already recorded
+    const [existing] = await connection.query(
+      'SELECT id FROM accounting_journal_entries WHERE reference_type = "order" AND reference_id = ? AND debit_account = "Pembatalan penjualan"',
+      [orderId]
+    );
+    if (existing.length > 0) {
+      return;
+    }
+
+    const desc = `Pengembalian dana pembatalan pesanan #${orderId}${refundNotes ? ': ' + refundNotes : ''}`;
+
+    // 1. Neraca: Debit Pembatalan penjualan, Kredit Kas
+    await connection.query(
+      `INSERT INTO accounting_journal_entries 
+       (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+       VALUES (CURRENT_DATE, 'order', ?, ?, 'Pembatalan penjualan', 'Kas', ?, ?)`,
+      [orderId, desc, refund, userId || null]
+    );
+
+    // 2. Arus Kas: Operasi -> Penjualan (Kas keluar)
+    const [cfRes] = await connection.query(
+      `INSERT INTO cash_flow_transactions 
+       (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+       VALUES ('expense', 'operasi', 'Penjualan', 'Pembatalan penjualan', 'Kas', ?, ?, ?, ?)`,
+      [refund, desc, orderId, userId || null]
+    );
+
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+       VALUES (?, ?, 'expense', ?, ?, 'operasi', 'Penjualan', 'Pembatalan penjualan', 'Kas', 'created')`,
+      [cfRes.insertId, userId || null, refund, desc]
+    );
+  } catch (error) {
+    console.error('recordOrderCancellationFinancials error:', error);
+  }
+}
+
+/**
+ * 4. Otomatisasi Transaksi Pembelian (Purchases)
+ * Halaman 5 & 6 PDF:
+ * Tunai / Transfer:
+ * - Neraca: Debit Persediaan, Kredit Kas (total harga)
+ * - Arus Kas: Operasi -> Pembelian Persediaan (Kas keluar total harga)
+ * DP:
+ * - Neraca: Debit Persediaan (total harga), Kredit Kas (DP dibayar), Kredit Utang Usaha (sisa pembayaran)
+ * - Arus Kas: Operasi -> Pembelian Persediaan (Kas keluar DP dibayar)
+ */
+async function recordPurchaseFinancials(connection, purchase, userId) {
+  try {
+    const totalPrice = parseFloat(purchase.total_price) || 0;
+    if (totalPrice <= 0) return;
+
+    const method = (purchase.payment_method || 'Tunai');
+
+    // Check if already recorded
+    const [existing] = await connection.query(
+      'SELECT id FROM accounting_journal_entries WHERE reference_type = "purchase" AND reference_id = ?',
+      [purchase.id]
+    );
+    if (existing.length > 0) {
+      return;
+    }
+
+    if (method === 'DP') {
+      const dpAmount = parseFloat(purchase.dp_amount) || 0;
+      const remaining = parseFloat(purchase.remaining_payment) || (totalPrice - dpAmount);
+
+      // Neraca DP Pembelian:
+      // Debit Persediaan (totalPrice), Kredit Kas (dpAmount), Kredit Utang Usaha (remaining)
+      if (dpAmount > 0) {
+        await connection.query(
+          `INSERT INTO accounting_journal_entries 
+           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+           VALUES (?, 'purchase', ?, ?, 'Persediaan', 'Kas', ?, ?)`,
+          [purchase.purchase_date, purchase.id, `Pembelian #${purchase.purchase_no}: ${purchase.item_name} (DP Dibayar)`, dpAmount, userId || null]
+        );
+      }
+
+      if (remaining > 0) {
+        await connection.query(
+          `INSERT INTO accounting_journal_entries 
+           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+           VALUES (?, 'purchase', ?, ?, 'Persediaan', 'Utang Usaha', ?, ?)`,
+          [purchase.purchase_date, purchase.id, `Pembelian #${purchase.purchase_no}: ${purchase.item_name} (Utang Usaha)`, remaining, userId || null]
+        );
+      }
+
+      // Arus Kas: Kas keluar sebesar DP yang dibayar
+      if (dpAmount > 0) {
+        const [cfRes] = await connection.query(
+          `INSERT INTO cash_flow_transactions 
+           (type, activity_category, sub_category, debit_account, credit_account, amount, description, proof_image_url, created_by) 
+           VALUES ('expense', 'operasi', 'Pembelian persediaan', 'Persediaan', 'Kas', ?, ?, ?, ?)`,
+          [dpAmount, `Pembayaran DP pembelian #${purchase.purchase_no}: ${purchase.item_name}`, purchase.invoice_proof_url || null, userId || null]
+        );
+
+        await connection.query(
+          `INSERT INTO cash_flow_edit_history 
+           (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+           VALUES (?, ?, 'expense', ?, ?, 'operasi', 'Pembelian persediaan', 'Persediaan', 'Kas', 'created')`,
+          [cfRes.insertId, userId || null, dpAmount, `Pembayaran DP pembelian #${purchase.purchase_no}: ${purchase.item_name}`]
+        );
+      }
+    } else {
+      // Tunai atau Transfer
+      // Neraca: Debit Persediaan, Kredit Kas
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (?, 'purchase', ?, ?, 'Persediaan', 'Kas', ?, ?)`,
+        [purchase.purchase_date, purchase.id, `Pembelian #${purchase.purchase_no}: ${purchase.item_name} (${method})`, totalPrice, userId || null]
+      );
+
+      // Arus Kas: Kas keluar total pembayaran
+      const [cfRes] = await connection.query(
+        `INSERT INTO cash_flow_transactions 
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, proof_image_url, created_by) 
+         VALUES ('expense', 'operasi', 'Pembelian persediaan', 'Persediaan', 'Kas', ?, ?, ?, ?)`,
+        [totalPrice, `Pembelian persediaan #${purchase.purchase_no}: ${purchase.item_name} (${method})`, purchase.invoice_proof_url || null, userId || null]
+      );
+
+      await connection.query(
+        `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'expense', ?, ?, 'operasi', 'Pembelian persediaan', 'Persediaan', 'Kas', 'created')`,
+        [cfRes.insertId, userId || null, totalPrice, `Pembelian persediaan #${purchase.purchase_no}: ${purchase.item_name} (${method})`]
+      );
+    }
+  } catch (error) {
+    console.error('recordPurchaseFinancials error:', error);
+  }
+}
+
+/**
+ * 5. Pelunasan DP Pembelian
+ * Halaman 6 PDF:
+ * Pelunasan: Kas keluar sesuai sisa pembayaran.
+ * Neraca: Debit Utang Usaha, Kredit Kas
+ */
+async function recordPurchaseDpSettlement(connection, purchase, userId) {
+  try {
+    const remaining = parseFloat(purchase.remaining_payment) || 0;
+    if (remaining <= 0) return;
+
+    // Neraca: Debit Utang Usaha, Kredit Kas
+    await connection.query(
+      `INSERT INTO accounting_journal_entries 
+       (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+       VALUES (CURRENT_DATE, 'purchase', ?, ?, 'Utang Usaha', 'Kas', ?, ?)`,
+      [purchase.id, `Pelunasan utang pembelian #${purchase.purchase_no}: ${purchase.item_name}`, remaining, userId || null]
+    );
+
+    // Arus Kas: Operasi -> Pembelian persediaan (Kas keluar)
+    const [cfRes] = await connection.query(
+      `INSERT INTO cash_flow_transactions 
+       (type, activity_category, sub_category, debit_account, credit_account, amount, description, created_by) 
+       VALUES ('expense', 'operasi', 'Pembelian persediaan', 'Utang Usaha', 'Kas', ?, ?, ?)`,
+      [remaining, `Pelunasan pembelian #${purchase.purchase_no}: ${purchase.item_name}`, userId || null]
+    );
+
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+       VALUES (?, ?, 'expense', ?, ?, 'operasi', 'Pembelian persediaan', 'Utang Usaha', 'Kas', 'created')`,
+      [cfRes.insertId, userId || null, remaining, `Pelunasan pembelian #${purchase.purchase_no}: ${purchase.item_name}`]
+    );
+  } catch (error) {
+    console.error('recordPurchaseDpSettlement error:', error);
+  }
+}
+
+/**
+ * 6. Transaksi Pembelian Direturn
+ * Halaman 11 PDF:
+ * 1. Otomatis Neraca: Barang direturn, uang dikembalikan:
+ *    Debit: Kas, Kredit: Persediaan
+ * 2. Otomatis Arus Kas: Jika uang dikembalikan: Operasi -> Pembelian Persediaan, Kas masuk sesuai nominal pengembalian.
+ * 3. Otomatis Stok Persediaan: Stok berkurang sesuai jumlah barang yang direturn, stok opname otomatis menyesuaikan.
+ */
+async function recordPurchaseReturnFinancials(connection, purchase, returnAmount, returnQty, returnNotes, userId) {
+  try {
+    const amount = parseFloat(returnAmount) || 0;
+    const qty = parseFloat(returnQty) || 0;
+
+    // 1. Neraca jika ada pengembalian uang
+    if (amount > 0) {
+      const desc = `Return pembelian #${purchase.purchase_no}: ${purchase.item_name}${returnNotes ? ' - ' + returnNotes : ''}`;
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'purchase', ?, ?, 'Kas', 'Persediaan', ?, ?)`,
+        [purchase.id, desc, amount, userId || null]
+      );
+
+      // 2. Arus Kas: Kas masuk (refund)
+      const [cfRes] = await connection.query(
+        `INSERT INTO cash_flow_transactions 
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, created_by) 
+         VALUES ('income', 'operasi', 'Pembelian persediaan', 'Kas', 'Persediaan', ?, ?, ?)`,
+        [amount, desc, userId || null]
+      );
+
+      await connection.query(
+        `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'income', ?, ?, 'operasi', 'Pembelian persediaan', 'Kas', 'Persediaan', 'created')`,
+        [cfRes.insertId, userId || null, amount, desc]
+      );
+    }
+
+    // 3. Stok Persediaan berkurang jika barang direturn
+    if (qty > 0 && purchase.inventory_item_id) {
+      const [items] = await connection.query(
+        'SELECT stock FROM inventory_items WHERE id = ? FOR UPDATE',
+        [purchase.inventory_item_id]
+      );
+      if (items.length > 0) {
+        const stockInitial = parseFloat(items[0].stock);
+        const stockFinal = Math.max(0, stockInitial - qty);
+
+        await connection.query(
+          'UPDATE inventory_items SET stock = ? WHERE id = ?',
+          [stockFinal, purchase.inventory_item_id]
+        );
+
+        await connection.query(
+          `INSERT INTO inventory_stock_logs 
+           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+           VALUES (?, CURRENT_DATE, ?, 0, ?, ?, ?, 'return', ?, ?)`,
+          [
+            purchase.inventory_item_id,
+            stockInitial,
+            qty,
+            stockFinal,
+            `Return pembelian #${purchase.purchase_no}${returnNotes ? ': ' + returnNotes : ''}`,
+            purchase.id,
+            userId || null
+          ]
+        );
+      }
+    }
+  } catch (error) {
+    console.error('recordPurchaseReturnFinancials error:', error);
+  }
+}
+
+// Helpers for Purchase and Request Number Generators
+async function generatePurchaseNo(connection) {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const prefix = `PO-${yyyy}${mm}${dd}-`;
+
+  const [rows] = await connection.query(
+    'SELECT purchase_no FROM purchases WHERE purchase_no LIKE ? ORDER BY id DESC LIMIT 1',
+    [`${prefix}%`]
+  );
+
+  let nextNumber = 1;
+  if (rows.length > 0) {
+    const parts = rows[0].purchase_no.split('-');
+    const lastSeq = parseInt(parts[2], 10);
+    if (!isNaN(lastSeq)) {
+      nextNumber = lastSeq + 1;
+    }
+  }
+
+  return `${prefix}${String(nextNumber).padStart(3, '0')}`;
+}
+
+async function generateRequestNo(connection) {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const prefix = `PR-${yyyy}${mm}${dd}-`;
+
+  const [rows] = await connection.query(
+    'SELECT request_no FROM purchase_requests WHERE request_no LIKE ? ORDER BY id DESC LIMIT 1',
+    [`${prefix}%`]
+  );
+
+  let nextNumber = 1;
+  if (rows.length > 0) {
+    const parts = rows[0].request_no.split('-');
+    const lastSeq = parseInt(parts[2], 10);
+    if (!isNaN(lastSeq)) {
+      nextNumber = lastSeq + 1;
+    }
+  }
+
+  return `${prefix}${String(nextNumber).padStart(3, '0')}`;
+}
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -292,7 +748,7 @@ const getUnusedImages = async (productId) => {
     'SELECT media_url FROM product_images WHERE product_id = ?',
     [productId]
   );
-  
+
   const imageUrls = allProductImages.map(img => img.media_url);
   return imageUrls;
 };
@@ -319,7 +775,7 @@ app.put('/api/products/:id', authenticateToken, authorizeRole('admin'), upload.s
     if (req.file) {
       // Fetch the current product to get the old image
       const [products] = await pool.query('SELECT image_url FROM products WHERE id = ?', [req.params.id]);
-      
+
       if (products.length > 0 && products[0].image_url) {
         const oldImagePath = products[0].image_url;
         // Delete old image file if it exists
@@ -349,7 +805,7 @@ app.delete('/api/products/:id', authenticateToken, authorizeRole('admin'), async
   try {
     // Fetch the product to get its image before deleting
     const [products] = await pool.query('SELECT image_url FROM products WHERE id = ?', [req.params.id]);
-    
+
     if (products.length > 0 && products[0].image_url) {
       const imagePath = products[0].image_url;
       // Delete the image file if it exists
@@ -419,7 +875,7 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE 1=1
     `;
-    
+
     let baseParams = [];
     let whereClauses = [];
 
@@ -486,13 +942,13 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE 1=1${whereClause}
     `;
-    
+
     const [countRows] = await pool.query(countQuery, baseParams);
     const total = countRows[0]?.total || 0;
 
     // Data query with pagination
     let dataQuery = baseSelect + whereClause + ' GROUP BY o.id ORDER BY o.is_pinned DESC, o.created_at DESC LIMIT ? OFFSET ?';
-    
+
     const dataParams = [...baseParams, limitInt, offset];
     const [orders] = await pool.query(dataQuery, dataParams);
 
@@ -641,9 +1097,9 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       if (isNaN(price) || price < 0) {
         price = 0;
       }
-      
+
       let variant_name = null;
-      
+
       // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
         const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
@@ -658,7 +1114,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         price = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
       }
-      
+
       // Process addons if provided
       let addonTotal = 0;
       let addonsData = [];
@@ -668,7 +1124,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
           `SELECT id, name, price FROM product_addons WHERE id IN (${placeholders}) AND product_id = ? AND is_active = TRUE`,
           [...item.addon_ids, item.product_id]
         );
-        
+
         for (const addon of addons) {
           const addonPrice = parseFloat(addon.price) || 0;
           addonTotal += addonPrice;
@@ -679,11 +1135,11 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
           });
         }
       }
-      
+
       // Calculate subtotal: (base_price + addon_total) * quantity
       const basePriceWithAddons = price + addonTotal;
       const subtotal = basePriceWithAddons * item.quantity;
-      
+
       // Ensure subtotal is a valid number
       const validSubtotal = isNaN(subtotal) ? 0 : subtotal;
       total_amount += validSubtotal;
@@ -738,11 +1194,11 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
     total_amount = isNaN(total_amount) ? 0 : parseFloat(total_amount) || 0;
     discount_amount = isNaN(discount_amount) ? 0 : parseFloat(discount_amount) || 0;
     margin_amount = isNaN(margin_amount) ? 0 : parseFloat(margin_amount) || 0;
-    
+
     // Calculate base_amount (before margin) and final_amount (with margin)
     const base_amount = total_amount - discount_amount;
     const final_amount = Math.max(0, base_amount + margin_amount);
-    
+
     // Final validation to ensure no NaN values
     if (isNaN(total_amount) || isNaN(discount_amount) || isNaN(final_amount)) {
       throw new Error('Invalid amount calculation detected');
@@ -782,7 +1238,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         guest_sharelok_link, guest_landmark, guest_delivery_type
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        guestUserId, voucher_id, total_amount, discount_amount, 0, final_amount, 
+        guestUserId, voucher_id, total_amount, discount_amount, 0, final_amount,
         payment_method, payment_amount, delivery_address, delivery_notes,
         guestData.customer_name || null,
         guestData.wa_number_1 || null,
@@ -829,6 +1285,9 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
       );
     }
 
+    // Integrasi Keuangan Otomatis (Neraca & Arus Kas)
+    await recordOrderSalesFinancials(connection, orderId, payment_method, payment_amount, final_amount, guestUserId);
+
     await connection.commit();
 
     res.status(201).json({
@@ -852,7 +1311,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     // Handle both JSON and FormData
     let items, voucher_code, cashback_used, payment_method, delivery_address, delivery_notes;
-    
+
     // Check if request is FormData (items will be a JSON string) or JSON (items will be an array)
     if (req.body.items && typeof req.body.items === 'string') {
       // FormData - parse JSON strings
@@ -950,7 +1409,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
 
       let variant_name = null;
-      
+
       // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
         const [variants] = await connection.query('SELECT name, price_adjustment FROM product_variants WHERE id = ? AND product_id = ? AND is_active = TRUE', [item.variant_id, item.product_id]);
@@ -965,7 +1424,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         price = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
       }
-      
+
       // Process addons if provided
       let addonTotal = 0;
       let addonsData = [];
@@ -975,7 +1434,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
           `SELECT id, name, price FROM product_addons WHERE id IN (${placeholders}) AND product_id = ? AND is_active = TRUE`,
           [...item.addon_ids, item.product_id]
         );
-        
+
         for (const addon of addons) {
           const addonPrice = Number(addon.price || 0);
           if (Number.isFinite(addonPrice) && addonPrice >= 0) {
@@ -988,11 +1447,11 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
           }
         }
       }
-      
+
       // Calculate subtotal: (base_price + addon_total) * quantity
       const basePriceWithAddons = price + addonTotal;
       const subtotal = basePriceWithAddons * item.quantity;
-      
+
       // Ensure subtotal is a valid number
       const validSubtotal = Number.isFinite(subtotal) ? subtotal : 0;
       total_amount += validSubtotal;
@@ -1060,22 +1519,22 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
     discount_amount = Number.isFinite(discount_amount) ? Number(discount_amount) : 0;
     cashback_used = Number.isFinite(cashback_used) ? Number(cashback_used) : 0;
     margin_amount = Number.isFinite(margin_amount) ? Number(margin_amount) : 0;
-    
+
     // Calculate base_amount (before margin) and final_amount (with margin)
     const base_amount = total_amount - discount_amount - cashback_used;
-    
+
     // Validate base_amount is not negative
     if (base_amount < 0) {
       throw new Error('Total pembayaran tidak valid. Diskon atau cashback melebihi total belanja.');
     }
-    
+
     const final_amount = base_amount + margin_amount;
 
     // Final validation to prevent NaN from being sent to the database
     if (!Number.isFinite(total_amount) || !Number.isFinite(base_amount) || !Number.isFinite(final_amount)) {
       throw new Error('Perhitungan total pesanan tidak valid (hasil bukan angka)');
     }
-    
+
     // Validate final_amount is not negative
     if (final_amount < 0) {
       throw new Error('Total akhir tidak valid.');
@@ -1093,8 +1552,8 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     // Build delivery_notes as JSON string
     // If delivery_notes is already a JSON string, use it; otherwise stringify guestData
-    const deliveryNotesJson = (delivery_notes && typeof delivery_notes === 'string' && delivery_notes.trim().startsWith('{')) 
-      ? delivery_notes 
+    const deliveryNotesJson = (delivery_notes && typeof delivery_notes === 'string' && delivery_notes.trim().startsWith('{'))
+      ? delivery_notes
       : (Object.keys(guestData).length > 0 ? JSON.stringify(guestData) : (delivery_notes || ''));
 
     // Extract payment amount and partner info from delivery_notes
@@ -1177,10 +1636,10 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat dengan bukti pembayaran', proofImageUrl]
       );
     } else {
-    await connection.query(
-      'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
-      [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
-    );
+      await connection.query(
+        'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes) VALUES (?, ?, ?, ?, ?)',
+        [orderId, 'dibuat', req.user.id, req.user.name || 'Customer', 'Pesanan dibuat']
+      );
     }
 
     // Create commission record if user is marketing
@@ -1217,6 +1676,9 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       );
     }
 
+    // Integrasi Keuangan Otomatis (Neraca & Arus Kas)
+    await recordOrderSalesFinancials(connection, orderId, payment_method, payment_amount, final_amount, req.user.id);
+
     await connection.commit();
 
     res.status(201).json({
@@ -1239,9 +1701,9 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
 ]), async (req, res) => {
   try {
     const { status, notes } = req.body;
-    
+
     let proof_image_url = null;
-    
+
     // Handle proof (single file - for dapur/operasional)
     if (req.files && req.files.proof && req.files.proof[0]) {
       proof_image_url = `/uploads/${req.files.proof[0].filename}`;
@@ -1270,65 +1732,39 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       [req.params.id, status, req.user.id, handlerName, notes, proof_image_url]
     );
 
-    // Auto-create income entry and update commission status when order status changes to 'selesai'
+    // Update commission status to 'completed' when order is completed
     if (status === 'selesai' && currentStatus !== 'selesai') {
-      const connection = await pool.getConnection();
       try {
-        await connection.beginTransaction();
-
-        // Check if income entry already exists for this order
-        const [existingIncome] = await connection.query(
-          'SELECT id FROM cash_flow_transactions WHERE order_id = ? AND type = ?',
-          [req.params.id, 'income']
-        );
-
-        if (existingIncome.length === 0) {
-          // Create income transaction with activity_category = 'operasi'
-          const [result] = await connection.query(
-            'INSERT INTO cash_flow_transactions (type, activity_category, amount, description, order_id, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-            [
-              'income',
-              'operasi',
-              orderAmount,
-              `Pemasukan dari pesanan #${req.params.id}`,
-              req.params.id,
-              req.user.id
-            ]
-          );
-
-          // Log creation in edit history
-          await connection.query(
-            `INSERT INTO cash_flow_edit_history 
-             (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, change_type) 
-             VALUES (?, ?, ?, ?, ?, ?, 'created')`,
-            [
-              result.insertId, req.user.id,
-              'income', orderAmount,
-              `Pemasukan dari pesanan #${req.params.id}`, 'operasi'
-            ]
-          );
-        }
-
-        // Update commission status to 'completed' when order is completed
-        await connection.query(
+        await pool.query(
           `UPDATE commissions 
            SET status = 'completed', updated_at = NOW() 
            WHERE order_id = ? AND status = 'pending'`,
           [req.params.id]
         );
-
-        await connection.commit();
       } catch (error) {
-        await connection.rollback();
         console.error('Error updating order completion status:', error);
-      } finally {
-        connection.release();
       }
     }
 
-    // Update commission status to 'cancelled' when order is cancelled
+    // Update commission status and refund if order is cancelled (Halaman 9 & 10 PDF)
     if (status === 'dibatalkan' && currentStatus !== 'dibatalkan') {
       try {
+        const refundAmount = parseFloat(req.body.refund_amount) || 0;
+        const refundNotes = req.body.refund_notes || notes || '';
+
+        if (refundAmount > 0) {
+          await pool.query(
+            'UPDATE orders SET refund_amount = ?, refund_notes = ? WHERE id = ?',
+            [refundAmount, refundNotes, req.params.id]
+          );
+          const conn = await pool.getConnection();
+          try {
+            await recordOrderCancellationFinancials(conn, req.params.id, refundAmount, refundNotes, req.user.id);
+          } finally {
+            conn.release();
+          }
+        }
+
         await pool.query(
           `UPDATE commissions 
            SET status = 'cancelled', updated_at = NOW() 
@@ -1336,8 +1772,7 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
           [req.params.id]
         );
       } catch (error) {
-        console.error('Error updating commission status to cancelled:', error);
-        // Don't fail the entire request if commission update fails
+        console.error('Error handling order cancellation:', error);
       }
     }
 
@@ -1434,7 +1869,7 @@ app.post('/api/orders/:id/review', authenticateToken, upload.single('image'), as
 app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const { type, status } = req.query;
-    
+
     let reviews = [];
     let complaints = [];
 
@@ -1474,7 +1909,7 @@ app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, r
 
     // Combine and filter
     let combined = [...reviews, ...complaints];
-    
+
     if (status === 'resolved') {
       combined = combined.filter(r => r.resolved === 1);
     } else if (status === 'pending') {
@@ -1787,7 +2222,7 @@ app.put('/api/banners/:id', authenticateToken, authorizeRole('admin'), upload.si
     if (req.file) {
       // Fetch the current banner to get the old image
       const [banners] = await pool.query('SELECT image_url FROM banners WHERE id = ?', [req.params.id]);
-      
+
       if (banners.length > 0 && banners[0].image_url) {
         const oldImagePath = banners[0].image_url;
         // Delete old image file if it exists
@@ -1817,7 +2252,7 @@ app.delete('/api/banners/:id', authenticateToken, authorizeRole('admin'), async 
   try {
     // Fetch the banner to get its image before deleting
     const [banners] = await pool.query('SELECT image_url FROM banners WHERE id = ?', [req.params.id]);
-    
+
     if (banners.length > 0 && banners[0].image_url) {
       const imagePath = banners[0].image_url;
       // Delete the image file if it exists
@@ -2113,7 +2548,7 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
     // Base WHERE params (shared between count & data queries)
     const baseParams = [req.user.id];
     let whereClauses = [];
-    
+
     if (status && status !== 'all') {
       whereClauses.push('c.status = ?');
       baseParams.push(status);
@@ -2197,7 +2632,7 @@ app.get('/api/commission/orders', authenticateToken, authorizeRole('marketing'),
 app.post('/api/commission/withdraw', authenticateToken, authorizeRole('marketing'), async (req, res) => {
   try {
     const { amount, bank_name, account_number, account_name } = req.body;
-    
+
     if (!amount || !bank_name || !account_number || !account_name) {
       return res.status(400).json({ message: 'Semua field harus diisi' });
     }
@@ -2393,7 +2828,7 @@ app.put('/api/admin/commission-withdrawals/:id', authenticateToken, authorizeRol
     connection.release();
     res.json({ message: 'Status penarikan berhasil diupdate' });
   } catch (error) {
-    await connection.rollback().catch(() => {});
+    await connection.rollback().catch(() => { });
     connection.release();
     console.error('Update withdrawal status error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
@@ -2411,15 +2846,35 @@ app.put('/api/admin/orders/:id/payment-status', authenticateToken, authorizeRole
     }
 
     // Check if order exists
-    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [id]);
+    const [orders] = await pool.query('SELECT * FROM orders WHERE id = ?', [id]);
     if (orders.length === 0) {
       return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
     }
+
+    const order = orders[0];
+    const previousPaymentStatus = order.payment_status;
 
     await pool.query(
       'UPDATE orders SET payment_status = ? WHERE id = ?',
       [payment_status, id]
     );
+
+    // Jika berubah menjadi 'paid' dari 'partial'/'pending' dan metode adalah 'dp'
+    // Catat Pelunasan DP (Halaman 4 PDF): Debit Kas, Kredit Piutang Usaha
+    if (payment_status === 'paid' && previousPaymentStatus !== 'paid' && order.payment_method === 'dp') {
+      const finalAmount = parseFloat(order.final_amount) || 0;
+      const dpPaid = parseFloat(order.payment_amount) > 0 ? parseFloat(order.payment_amount) : (finalAmount * 0.5);
+      const remaining = Math.max(0, finalAmount - dpPaid);
+
+      if (remaining > 0) {
+        const connection = await pool.getConnection();
+        try {
+          await recordOrderDpSettlement(connection, id, remaining, req.user.id);
+        } finally {
+          connection.release();
+        }
+      }
+    }
 
     res.json({ message: 'Status pembayaran berhasil diupdate' });
   } catch (error) {
@@ -2446,22 +2901,22 @@ app.put('/api/admin/orders/:id/notes', authenticateToken, authorizeRole('admin')
     // If current notes is JSON and we want to preserve structure
     if (currentNotes) {
       try {
-        const parsedNotes = typeof currentNotes === 'string' && currentNotes.trim().startsWith('{') 
-          ? JSON.parse(currentNotes) 
+        const parsedNotes = typeof currentNotes === 'string' && currentNotes.trim().startsWith('{')
+          ? JSON.parse(currentNotes)
           : { notes: currentNotes };
-        
+
         // Preserve customer notes (original 'notes' field) if it exists and is different from admin/kitchen notes
         // Only update admin_notes and kitchen_notes, keep customer notes intact
-        const customerNotes = parsedNotes.notes && 
-          parsedNotes.notes !== parsedNotes.kitchen_notes && 
+        const customerNotes = parsedNotes.notes &&
+          parsedNotes.notes !== parsedNotes.kitchen_notes &&
           parsedNotes.notes !== parsedNotes.admin_notes
-          ? parsedNotes.notes 
+          ? parsedNotes.notes
           : (parsedNotes.notes || '');
-        
+
         // Update or add kitchen_notes and admin_notes fields
         parsedNotes.kitchen_notes = notes || '';
         parsedNotes.admin_notes = notes || '';
-        
+
         // Preserve customer notes if they exist separately
         if (customerNotes && customerNotes !== notes) {
           parsedNotes.notes = customerNotes;
@@ -2469,15 +2924,15 @@ app.put('/api/admin/orders/:id/notes', authenticateToken, authorizeRole('admin')
           // If no customer notes exist, set notes to empty or the admin notes
           parsedNotes.notes = '';
         }
-        
+
         updatedNotes = JSON.stringify(parsedNotes);
       } catch {
         // If not JSON, preserve the original as customer notes and create JSON structure
         const customerNotes = currentNotes || '';
-        updatedNotes = JSON.stringify({ 
-          notes: customerNotes, 
-          kitchen_notes: notes || '', 
-          admin_notes: notes || '' 
+        updatedNotes = JSON.stringify({
+          notes: customerNotes,
+          kitchen_notes: notes || '',
+          admin_notes: notes || ''
         });
       }
     } else {
@@ -2773,8 +3228,8 @@ app.post('/api/cart', authenticateToken, async (req, res) => {
     const { product_id, variant_id, quantity, addon_ids, total_price } = req.body;
 
     // Convert addon_ids to JSON string if it's an array
-    const addonIdsJson = addon_ids && Array.isArray(addon_ids) && addon_ids.length > 0 
-      ? JSON.stringify(addon_ids) 
+    const addonIdsJson = addon_ids && Array.isArray(addon_ids) && addon_ids.length > 0
+      ? JSON.stringify(addon_ids)
       : null;
 
     const [existing] = await pool.query(
@@ -3320,10 +3775,10 @@ app.get('/', (req, res) => {
 app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    
+
     let dateFilter = '';
     const params = [];
-    
+
     if (start_date && end_date) {
       dateFilter = 'AND DATE(created_at) BETWEEN ? AND ?';
       params.push(start_date, end_date);
@@ -3347,7 +3802,7 @@ app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), asy
       const incomeQuery = `SELECT COALESCE(SUM(amount), 0) as total 
            FROM cash_flow_transactions 
            WHERE type = 'income' AND activity_category = ? ${dateFilter}`;
-      
+
       const expenseQuery = `SELECT COALESCE(SUM(amount), 0) as total 
            FROM cash_flow_transactions 
            WHERE type = 'expense' AND activity_category = ? ${dateFilter}`;
@@ -3381,8 +3836,8 @@ app.get('/api/cash-flow/summary', authenticateToken, authorizeRole('admin'), asy
 // Get all cash flow transactions with pagination and filters
 app.get('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
-    const { type, activity_category, start_date, end_date, limit = 10, offset = 0 } = req.query;
-    
+    const { type, activity_category, sub_category, start_date, end_date, limit = 10, offset = 0 } = req.query;
+
     let query = `
       SELECT cft.*, 
              u.name as created_by_name,
@@ -3412,6 +3867,13 @@ app.get('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin')
       countQuery += ' AND cft.activity_category = ?';
       params.push(activity_category);
       countParams.push(activity_category);
+    }
+
+    if (sub_category) {
+      query += ' AND cft.sub_category = ?';
+      countQuery += ' AND cft.sub_category = ?';
+      params.push(sub_category);
+      countParams.push(sub_category);
     }
 
     if (start_date && end_date) {
@@ -3451,7 +3913,7 @@ app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'
   try {
     await connection.beginTransaction();
 
-    const { type, amount, description, activity_category } = req.body;
+    const { type, amount, description, activity_category, sub_category, debit_account, credit_account } = req.body;
 
     if (!type || !amount) {
       return res.status(400).json({ message: 'Type dan amount harus diisi' });
@@ -3462,8 +3924,8 @@ app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'
     }
 
     const validCategories = ['operasi', 'investasi', 'pendanaan'];
-    const category = activity_category && validCategories.includes(activity_category) 
-      ? activity_category 
+    const category = activity_category && validCategories.includes(activity_category)
+      ? activity_category
       : 'operasi';
 
     let proof_image_url = null;
@@ -3472,8 +3934,8 @@ app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'
     }
 
     const [result] = await connection.query(
-      'INSERT INTO cash_flow_transactions (type, activity_category, amount, description, proof_image_url, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-      [type, category, parseFloat(amount), description || null, proof_image_url, req.user.id]
+      'INSERT INTO cash_flow_transactions (type, activity_category, sub_category, debit_account, credit_account, amount, description, proof_image_url, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [type, category, sub_category || null, debit_account || null, credit_account || null, parseFloat(amount), description || null, proof_image_url, req.user.id]
     );
 
     const transactionId = result.insertId;
@@ -3481,10 +3943,20 @@ app.post('/api/cash-flow/transactions', authenticateToken, authorizeRole('admin'
     // Log creation in edit history
     await connection.query(
       `INSERT INTO cash_flow_edit_history 
-       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, change_type) 
-       VALUES (?, ?, ?, ?, ?, ?, 'created')`,
-      [transactionId, req.user.id, type, parseFloat(amount), description || null, category]
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created')`,
+      [transactionId, req.user.id, type, parseFloat(amount), description || null, category, sub_category || null, debit_account || null, credit_account || null]
     );
+
+    // If debit_account and credit_account provided, record to accounting_journal_entries for Neraca
+    if (debit_account && credit_account) {
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'cash_flow', ?, ?, ?, ?, ?, ?)`,
+        [transactionId, description || 'Transaksi Arus Kas', debit_account, credit_account, parseFloat(amount), req.user.id]
+      );
+    }
 
     await connection.commit();
 
@@ -3507,12 +3979,12 @@ app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('adm
   try {
     await connection.beginTransaction();
 
-    const { type, amount, description, activity_category } = req.body;
+    const { type, amount, description, activity_category, sub_category, debit_account, credit_account } = req.body;
     const transactionId = req.params.id;
 
     // Get current transaction data for history
     const [currentTransactions] = await connection.query(
-      'SELECT type, amount, description, activity_category FROM cash_flow_transactions WHERE id = ?',
+      'SELECT type, amount, description, activity_category, sub_category, debit_account, credit_account FROM cash_flow_transactions WHERE id = ?',
       [transactionId]
     );
     if (currentTransactions.length === 0) {
@@ -3527,7 +3999,7 @@ app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('adm
       proof_image_url = `/uploads/${req.file.filename}`;
     }
 
-    const updateFields = [];
+    const updateFields = ['is_edited = 1'];
     const updateParams = [];
     const historyChanges = {
       old_type: current.type,
@@ -3537,7 +4009,13 @@ app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('adm
       old_description: current.description,
       new_description: current.description,
       old_activity_category: current.activity_category,
-      new_activity_category: current.activity_category
+      new_activity_category: current.activity_category,
+      old_sub_category: current.sub_category,
+      new_sub_category: current.sub_category,
+      old_debit_account: current.debit_account,
+      new_debit_account: current.debit_account,
+      old_credit_account: current.credit_account,
+      new_credit_account: current.credit_account
     };
 
     if (type && type !== current.type) {
@@ -3563,14 +4041,24 @@ app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('adm
         historyChanges.new_activity_category = activity_category;
       }
     }
+    if (sub_category !== undefined && sub_category !== current.sub_category) {
+      updateFields.push('sub_category = ?');
+      updateParams.push(sub_category || null);
+      historyChanges.new_sub_category = sub_category || null;
+    }
+    if (debit_account !== undefined && debit_account !== current.debit_account) {
+      updateFields.push('debit_account = ?');
+      updateParams.push(debit_account || null);
+      historyChanges.new_debit_account = debit_account || null;
+    }
+    if (credit_account !== undefined && credit_account !== current.credit_account) {
+      updateFields.push('credit_account = ?');
+      updateParams.push(credit_account || null);
+      historyChanges.new_credit_account = credit_account || null;
+    }
     if (proof_image_url) {
       updateFields.push('proof_image_url = ?');
       updateParams.push(proof_image_url);
-    }
-
-    if (updateFields.length === 0) {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
     }
 
     updateParams.push(transactionId);
@@ -3583,16 +4071,56 @@ app.put('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('adm
     await connection.query(
       `INSERT INTO cash_flow_edit_history 
        (transaction_id, changed_by, old_type, new_type, old_amount, new_amount, 
-        old_description, new_description, old_activity_category, new_activity_category, change_type) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'updated')`,
+        old_description, new_description, old_activity_category, new_activity_category,
+        old_sub_category, new_sub_category, old_debit_account, new_debit_account,
+        old_credit_account, new_credit_account, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'updated')`,
       [
         transactionId, req.user.id,
         historyChanges.old_type, historyChanges.new_type,
         historyChanges.old_amount, historyChanges.new_amount,
         historyChanges.old_description, historyChanges.new_description,
-        historyChanges.old_activity_category, historyChanges.new_activity_category
+        historyChanges.old_activity_category, historyChanges.new_activity_category,
+        historyChanges.old_sub_category, historyChanges.new_sub_category,
+        historyChanges.old_debit_account, historyChanges.new_debit_account,
+        historyChanges.old_credit_account, historyChanges.new_credit_account
       ]
     );
+
+    // Sync with accounting_journal_entries
+    const finalDebit = historyChanges.new_debit_account;
+    const finalCredit = historyChanges.new_credit_account;
+    const finalAmount = parseFloat(historyChanges.new_amount);
+    const finalDesc = historyChanges.new_description || 'Transaksi Arus Kas';
+
+    const [existingJournals] = await connection.query(
+      'SELECT id FROM accounting_journal_entries WHERE reference_type = "cash_flow" AND reference_id = ?',
+      [transactionId]
+    );
+
+    if (finalDebit && finalCredit) {
+      if (existingJournals.length > 0) {
+        await connection.query(
+          `UPDATE accounting_journal_entries 
+           SET debit_account = ?, credit_account = ?, amount = ?, description = ? 
+           WHERE id = ?`,
+          [finalDebit, finalCredit, finalAmount, finalDesc, existingJournals[0].id]
+        );
+      } else {
+        await connection.query(
+          `INSERT INTO accounting_journal_entries 
+           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+           VALUES (CURRENT_DATE, 'cash_flow', ?, ?, ?, ?, ?, ?)`,
+          [transactionId, finalDesc, finalDebit, finalCredit, finalAmount, req.user.id]
+        );
+      }
+    } else if (existingJournals.length > 0) {
+      // If debit or credit removed, delete journal
+      await connection.query(
+        'DELETE FROM accounting_journal_entries WHERE id = ?',
+        [existingJournals[0].id]
+      );
+    }
 
     await connection.commit();
 
@@ -3616,7 +4144,7 @@ app.delete('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('
 
     // Get transaction data for history before deletion
     const [transactions] = await connection.query(
-      'SELECT id, type, amount, description, activity_category, proof_image_url FROM cash_flow_transactions WHERE id = ?',
+      'SELECT id, type, amount, description, activity_category, sub_category, debit_account, credit_account, proof_image_url FROM cash_flow_transactions WHERE id = ?',
       [transactionId]
     );
     if (transactions.length === 0) {
@@ -3629,13 +4157,20 @@ app.delete('/api/cash-flow/transactions/:id', authenticateToken, authorizeRole('
     // Log deletion in history
     await connection.query(
       `INSERT INTO cash_flow_edit_history 
-       (transaction_id, changed_by, old_type, old_amount, old_description, old_activity_category, change_type) 
-       VALUES (?, ?, ?, ?, ?, ?, 'deleted')`,
+       (transaction_id, changed_by, old_type, old_amount, old_description, old_activity_category, old_sub_category, old_debit_account, old_credit_account, change_type) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'deleted')`,
       [
         transactionId, req.user.id,
         transaction.type, transaction.amount,
-        transaction.description, transaction.activity_category
+        transaction.description, transaction.activity_category,
+        transaction.sub_category, transaction.debit_account, transaction.credit_account
       ]
+    );
+
+    // Delete associated journal entry
+    await connection.query(
+      'DELETE FROM accounting_journal_entries WHERE reference_type = "cash_flow" AND reference_id = ?',
+      [transactionId]
     );
 
     // Delete proof image if exists
@@ -3849,6 +4384,230 @@ app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), asyn
 });
 
 // ========================================
+// NERACA (BALANCE SHEET) ENDPOINTS
+// ========================================
+
+const DEBIT_ACCOUNTS = [
+  'Kas',
+  'Bank',
+  'Piutang Usaha',
+  'Persediaan',
+  'Perlengkapan',
+  'Aset Tetap',
+  'HPP',
+  'Beban Operasional',
+  'Beban Bunga',
+  'Pembatalan penjualan'
+];
+
+const CREDIT_ACCOUNTS = [
+  'Utang Usaha',
+  'Utang Bank',
+  'Utang/Beban Masih Harus Dibayar',
+  'Modal Pemilik',
+  'Laba Ditahan',
+  'Prive',
+  'Pendapatan Penjualan',
+  'Pendapatan Jasa',
+  'Pendapatan Lainnya'
+];
+
+// Get standard chart of accounts
+app.get('/api/neraca/accounts', authenticateToken, authorizeRole('admin'), (req, res) => {
+  res.json({
+    debitAccounts: DEBIT_ACCOUNTS,
+    creditAccounts: CREDIT_ACCOUNTS
+  });
+});
+
+// Get Neraca summary (tabel neraca berdasarkan total saldo saja)
+app.get('/api/neraca/summary', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+    let dateFilter = '';
+    const params = [];
+
+    if (start_date && end_date) {
+      dateFilter = ' WHERE entry_date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+    } else if (end_date) {
+      dateFilter = ' WHERE entry_date <= ?';
+      params.push(end_date);
+    }
+
+    // Query debit accounts total
+    const [debitRows] = await pool.query(
+      `SELECT debit_account, SUM(amount) as total 
+       FROM accounting_journal_entries 
+       ${dateFilter} 
+       GROUP BY debit_account`,
+      params
+    );
+
+    // Query credit accounts total
+    const [creditRows] = await pool.query(
+      `SELECT credit_account, SUM(amount) as total 
+       FROM accounting_journal_entries 
+       ${dateFilter} 
+       GROUP BY credit_account`,
+      params
+    );
+
+    // Map into lists
+    const debitMap = {};
+    debitRows.forEach(row => {
+      debitMap[row.debit_account] = parseFloat(row.total || 0);
+    });
+
+    const creditMap = {};
+    creditRows.forEach(row => {
+      creditMap[row.credit_account] = parseFloat(row.total || 0);
+    });
+
+    // Build complete debit accounts list
+    let totalDebit = 0;
+    const debitList = DEBIT_ACCOUNTS.map(account => {
+      const amount = debitMap[account] || 0;
+      totalDebit += amount;
+      return { account, amount };
+    });
+
+    // Build complete credit accounts list
+    let totalCredit = 0;
+    const creditList = CREDIT_ACCOUNTS.map(account => {
+      const amount = creditMap[account] || 0;
+      totalCredit += amount;
+      return { account, amount };
+    });
+
+    // Also include any custom accounts not in standard list if any
+    debitRows.forEach(row => {
+      if (!DEBIT_ACCOUNTS.includes(row.debit_account)) {
+        const amount = parseFloat(row.total || 0);
+        totalDebit += amount;
+        debitList.push({ account: row.debit_account, amount });
+      }
+    });
+
+    creditRows.forEach(row => {
+      if (!CREDIT_ACCOUNTS.includes(row.credit_account)) {
+        const amount = parseFloat(row.total || 0);
+        totalCredit += amount;
+        creditList.push({ account: row.credit_account, amount });
+      }
+    });
+
+    res.json({
+      debitList,
+      creditList,
+      totalDebit,
+      totalCredit,
+      isBalanced: Math.abs(totalDebit - totalCredit) < 0.01,
+      difference: totalDebit - totalCredit
+    });
+  } catch (error) {
+    console.error('Get neraca summary error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat data neraca' });
+  }
+});
+
+// Get journal entries
+app.get('/api/neraca/journal', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { start_date, end_date, debit_account, credit_account, reference_type, limit = 20, offset = 0 } = req.query;
+
+    let query = `
+      SELECT j.*, u.name as created_by_name
+      FROM accounting_journal_entries j
+      LEFT JOIN users u ON j.created_by = u.id
+      WHERE 1=1
+    `;
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM accounting_journal_entries j
+      WHERE 1=1
+    `;
+    const params = [];
+    const countParams = [];
+
+    if (start_date && end_date) {
+      query += ' AND j.entry_date BETWEEN ? AND ?';
+      countQuery += ' AND j.entry_date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    if (debit_account) {
+      query += ' AND j.debit_account = ?';
+      countQuery += ' AND j.debit_account = ?';
+      params.push(debit_account);
+      countParams.push(debit_account);
+    }
+
+    if (credit_account) {
+      query += ' AND j.credit_account = ?';
+      countQuery += ' AND j.credit_account = ?';
+      params.push(credit_account);
+      countParams.push(credit_account);
+    }
+
+    if (reference_type) {
+      query += ' AND j.reference_type = ?';
+      countQuery += ' AND j.reference_type = ?';
+      params.push(reference_type);
+      countParams.push(reference_type);
+    }
+
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY j.entry_date DESC, j.id DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [entries] = await pool.query(query, params);
+
+    res.json({
+      entries,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get journal entries error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat jurnal' });
+  }
+});
+
+// Create manual journal entry
+app.post('/api/neraca/journal', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { entry_date, description, debit_account, credit_account, amount } = req.body;
+
+    if (!entry_date || !description || !debit_account || !credit_account || !amount) {
+      return res.status(400).json({ message: 'Semua field wajib diisi' });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO accounting_journal_entries 
+       (entry_date, reference_type, description, debit_account, credit_account, amount, created_by) 
+       VALUES (?, 'manual', ?, ?, ?, ?, ?)`,
+      [entry_date, description, debit_account, credit_account, parseFloat(amount), req.user.id]
+    );
+
+    res.status(201).json({
+      message: 'Jurnal berhasil ditambahkan',
+      id: result.insertId
+    });
+  } catch (error) {
+    console.error('Create journal entry error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambahkan jurnal' });
+  }
+});
+
+// ========================================
 // COMPANY SETTINGS ENDPOINTS
 // ========================================
 
@@ -3856,7 +4615,7 @@ app.get('/api/cash-flow/export', authenticateToken, authorizeRole('admin'), asyn
 app.get('/api/company-settings', authenticateToken, authorizeRole('admin'), async (req, res) => {
   try {
     const [settings] = await pool.query('SELECT * FROM company_settings WHERE id = 1');
-    
+
     if (settings.length === 0) {
       // Return default settings
       res.json({
@@ -3901,7 +4660,7 @@ app.put('/api/company-settings', authenticateToken, authorizeRole('admin'), uplo
 
     // Check if settings exist
     const [existing] = await pool.query('SELECT id FROM company_settings WHERE id = 1');
-    
+
     if (existing.length === 0) {
       // Insert new settings
       await pool.query(
@@ -4050,9 +4809,1854 @@ app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'ma
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server berjalan di http://localhost:${PORT}`);
+// ========================================
+// INVENTORY, PURCHASING & LABA RUGI ROUTES
+// ========================================
+
+// ==========================================
+// 1. MASTER STOK PERSEDIAAN & TRACKING ROUTES
+// ==========================================
+// ==========================================
+// 1. MASTER STOK PERSEDIAAN
+// ==========================================
+
+// Get distinct categories
+app.get('/api/inventory/categories', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT DISTINCT category FROM inventory_items WHERE category IS NOT NULL AND category != "" ORDER BY category ASC');
+    res.json(rows.map(r => r.category));
+  } catch (error) {
+    console.error('Get inventory categories error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat kategori' });
+  }
 });
+
+// Get inventory items list
+app.get('/api/inventory/items', authenticateToken, async (req, res) => {
+  try {
+    const { category, search, low_stock } = req.query;
+
+    let query = `
+        SELECT ii.*, 
+               (ii.stock <= ii.min_stock) as is_low_stock
+        FROM inventory_items ii 
+        WHERE 1=1
+      `;
+    const params = [];
+
+    if (category) {
+      query += ' AND ii.category = ?';
+      params.push(category);
+    }
+
+    if (search) {
+      query += ' AND (ii.name LIKE ? OR ii.category LIKE ? OR ii.notes LIKE ?)';
+      const searchPattern = `%${search}%`;
+      params.push(searchPattern, searchPattern, searchPattern);
+    }
+
+    if (low_stock === 'true' || low_stock === '1') {
+      query += ' AND ii.stock <= ii.min_stock';
+    }
+
+    query += ' ORDER BY ii.category ASC, ii.name ASC';
+
+    const [items] = await pool.query(query, params);
+    res.json(items);
+  } catch (error) {
+    console.error('Get inventory items error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat stok persediaan' });
+  }
+});
+
+// Add new inventory item
+app.post('/api/inventory/items', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { category, name, unit = 'Pcs', stock = 0, min_stock = 0, last_price = 0, notes } = req.body;
+
+    if (!category || !name) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Kategori dan nama barang wajib diisi' });
+    }
+
+    const initialStock = parseFloat(stock) || 0;
+    const minStock = parseFloat(min_stock) || 0;
+    const price = parseFloat(last_price) || 0;
+
+    const [result] = await connection.query(
+      `INSERT INTO inventory_items (category, name, unit, stock, min_stock, last_price, notes) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [category.trim(), name.trim(), unit, initialStock, minStock, price, notes || null]
+    );
+
+    const newItemId = result.insertId;
+
+    // Log initial stock if > 0
+    if (initialStock > 0) {
+      await connection.query(
+        `INSERT INTO inventory_stock_logs 
+           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+           VALUES (?, CURRENT_DATE, 0, ?, 0, ?, 'Saldo awal persediaan', 'manual', ?, ?)`,
+        [newItemId, initialStock, initialStock, newItemId, req.user.id]
+      );
+    }
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Barang persediaan berhasil ditambahkan',
+      itemId: newItemId
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create inventory item error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambahkan barang persediaan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Update inventory item
+app.put('/api/inventory/items/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category, name, unit, min_stock, last_price, notes } = req.body;
+
+    const [items] = await pool.query('SELECT id FROM inventory_items WHERE id = ?', [id]);
+    if (items.length === 0) {
+      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
+    }
+
+    await pool.query(
+      `UPDATE inventory_items 
+         SET category = ?, name = ?, unit = ?, min_stock = ?, last_price = ?, notes = ? 
+         WHERE id = ?`,
+      [
+        category.trim(),
+        name.trim(),
+        unit,
+        parseFloat(min_stock) || 0,
+        parseFloat(last_price) || 0,
+        notes || null,
+        id
+      ]
+    );
+
+    res.json({ message: 'Data barang persediaan berhasil diperbarui' });
+  } catch (error) {
+    console.error('Update inventory item error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui barang persediaan' });
+  }
+});
+
+// Delete inventory item
+app.delete('/api/inventory/items/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [items] = await pool.query('SELECT id FROM inventory_items WHERE id = ?', [id]);
+    if (items.length === 0) {
+      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
+    }
+
+    await pool.query('DELETE FROM inventory_items WHERE id = ?', [id]);
+    res.json({ message: 'Barang persediaan berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete inventory item error:', error);
+    res.status(500).json({ message: 'Gagal menghapus barang, kemungkinan terdapat riwayat transaksi yang terkait' });
+  }
+});
+
+// ==========================================
+// 2. TRACKING STOK PERSEDIAAN (KARTU STOK)
+// ==========================================
+
+// Get stock logs (Kartu Stok)
+app.get('/api/inventory/stock-logs', authenticateToken, async (req, res) => {
+  try {
+    const {
+      item_id,
+      category,
+      search,
+      start_date,
+      end_date,
+      limit = 20,
+      offset = 0
+    } = req.query;
+
+    let query = `
+        SELECT isl.*, 
+               ii.name as item_name, 
+               ii.category as item_category, 
+               ii.unit as item_unit, 
+               u.name as created_by_name
+        FROM inventory_stock_logs isl
+        JOIN inventory_items ii ON isl.inventory_item_id = ii.id
+        LEFT JOIN users u ON isl.created_by = u.id
+        WHERE 1=1
+      `;
+
+    let countQuery = `
+        SELECT COUNT(*) as total
+        FROM inventory_stock_logs isl
+        JOIN inventory_items ii ON isl.inventory_item_id = ii.id
+        WHERE 1=1
+      `;
+
+    const params = [];
+    const countParams = [];
+
+    if (item_id) {
+      query += ' AND isl.inventory_item_id = ?';
+      countQuery += ' AND isl.inventory_item_id = ?';
+      params.push(item_id);
+      countParams.push(item_id);
+    }
+
+    if (category) {
+      query += ' AND ii.category = ?';
+      countQuery += ' AND ii.category = ?';
+      params.push(category);
+      countParams.push(category);
+    }
+
+    if (search) {
+      query += ' AND (ii.name LIKE ? OR isl.notes LIKE ?)';
+      countQuery += ' AND (ii.name LIKE ? OR isl.notes LIKE ?)';
+      const pattern = `%${search}%`;
+      params.push(pattern, pattern);
+      countParams.push(pattern, pattern);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND isl.date BETWEEN ? AND ?';
+      countQuery += ' AND isl.date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY isl.date DESC, isl.id DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [logs] = await pool.query(query, params);
+
+    res.json({
+      logs,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get stock logs error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat kartu stok' });
+  }
+});
+
+// Manual stock adjustment
+app.post('/api/inventory/stock-logs/adjust', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { inventory_item_id, adjustment_type, quantity, notes } = req.body;
+
+    if (!inventory_item_id || !adjustment_type || !quantity || parseFloat(quantity) <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Item, jenis penyesuaian, dan jumlah valid wajib diisi' });
+    }
+
+    const qty = parseFloat(quantity);
+
+    const [items] = await connection.query(
+      'SELECT id, name, unit, stock FROM inventory_items WHERE id = ? FOR UPDATE',
+      [inventory_item_id]
+    );
+
+    if (items.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
+    }
+
+    const item = items[0];
+    const stockInitial = parseFloat(item.stock);
+    let stockIn = 0;
+    let stockOut = 0;
+    let stockFinal = stockInitial;
+
+    if (adjustment_type === 'in') {
+      stockIn = qty;
+      stockFinal = stockInitial + qty;
+    } else if (adjustment_type === 'out') {
+      stockOut = qty;
+      stockFinal = Math.max(0, stockInitial - qty);
+    } else {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Jenis penyesuaian tidak valid (in atau out)' });
+    }
+
+    await connection.query(
+      'UPDATE inventory_items SET stock = ? WHERE id = ?',
+      [stockFinal, inventory_item_id]
+    );
+
+    await connection.query(
+      `INSERT INTO inventory_stock_logs 
+         (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+         VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, 'manual', NULL, ?)`,
+      [inventory_item_id, stockInitial, stockIn, stockOut, stockFinal, notes || 'Penyesuaian stok manual', req.user.id]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Penyesuaian stok berhasil dicatat',
+      newStock: stockFinal
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Adjust stock error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyesuaikan stok' });
+  } finally {
+    connection.release();
+  }
+});
+
+// ==========================================
+// 3. STOK OPNAME
+// ==========================================
+
+// Get stok opname list
+app.get('/api/inventory/opname', authenticateToken, async (req, res) => {
+  try {
+    const { start_date, end_date, item_id, limit = 20, offset = 0 } = req.query;
+
+    let query = `
+        SELECT io.*, 
+               ii.name as item_name, 
+               ii.category as item_category, 
+               ii.unit as item_unit, 
+               u.name as checked_by_name
+        FROM inventory_opname io
+        JOIN inventory_items ii ON io.inventory_item_id = ii.id
+        LEFT JOIN users u ON io.checked_by = u.id
+        WHERE 1=1
+      `;
+    let countQuery = `
+        SELECT COUNT(*) as total
+        FROM inventory_opname io
+        WHERE 1=1
+      `;
+
+    const params = [];
+    const countParams = [];
+
+    if (item_id) {
+      query += ' AND io.inventory_item_id = ?';
+      countQuery += ' AND io.inventory_item_id = ?';
+      params.push(item_id);
+      countParams.push(item_id);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND io.date BETWEEN ? AND ?';
+      countQuery += ' AND io.date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY io.date DESC, io.id DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [opnames] = await pool.query(query, params);
+
+    res.json({
+      opnames,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get opname list error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat stok opname' });
+  }
+});
+
+// Create stok opname entry
+app.post('/api/inventory/opname', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { inventory_item_id, date, physical_stock, notes, sync_stock = false } = req.body;
+
+    if (!inventory_item_id || physical_stock === undefined || physical_stock === null) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Item persediaan dan stok fisik wajib diisi' });
+    }
+
+    const [items] = await connection.query(
+      'SELECT id, name, unit, stock FROM inventory_items WHERE id = ? FOR UPDATE',
+      [inventory_item_id]
+    );
+
+    if (items.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
+    }
+
+    const item = items[0];
+    const systemStock = parseFloat(item.stock);
+    const physicalStock = parseFloat(physical_stock);
+    const difference = physicalStock - systemStock;
+    const opnameDate = date || new Date().toISOString().split('T')[0];
+
+    // Insert opname record
+    const [opnameRes] = await connection.query(
+      `INSERT INTO inventory_opname 
+         (inventory_item_id, date, system_stock, physical_stock, difference, notes, checked_by) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [inventory_item_id, opnameDate, systemStock, physicalStock, difference, notes || null, req.user.id]
+    );
+
+    // If sync_stock is true and there is a difference, adjust system stock to match physical stock
+    if (sync_stock && difference !== 0) {
+      await connection.query(
+        'UPDATE inventory_items SET stock = ? WHERE id = ?',
+        [physicalStock, inventory_item_id]
+      );
+
+      let stockIn = 0;
+      let stockOut = 0;
+      if (difference > 0) {
+        stockIn = difference;
+      } else {
+        stockOut = Math.abs(difference);
+      }
+
+      await connection.query(
+        `INSERT INTO inventory_stock_logs 
+           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'opname', ?, ?)`,
+        [
+          inventory_item_id,
+          opnameDate,
+          systemStock,
+          stockIn,
+          stockOut,
+          physicalStock,
+          `Penyesuaian stok opname (${difference > 0 ? '+' : ''}${difference})${notes ? ': ' + notes : ''}`,
+          opnameRes.insertId,
+          req.user.id
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Stok opname berhasil disimpan',
+      opnameId: opnameRes.insertId,
+      difference,
+      synced: Boolean(sync_stock)
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create opname error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan stok opname' });
+  } finally {
+    connection.release();
+  }
+});
+
+// ==========================================
+// 2. PURCHASING (PEMBELIAN) ROUTES
+// ==========================================
+// 1. Get purchases list
+app.get('/api/purchases', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const {
+      status,
+      payment_status,
+      payment_method,
+      supplier,
+      search,
+      start_date,
+      end_date,
+      limit = 20,
+      offset = 0
+    } = req.query;
+
+    let query = `
+        SELECT p.*, 
+               pr.request_no,
+               u.name as created_by_name,
+               ii.stock as current_inventory_stock
+        FROM purchases p
+        LEFT JOIN purchase_requests pr ON p.request_id = pr.id
+        LEFT JOIN users u ON p.created_by = u.id
+        LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
+        WHERE 1=1
+      `;
+    let countQuery = `
+        SELECT COUNT(*) as total 
+        FROM purchases p 
+        WHERE 1=1
+      `;
+
+    const params = [];
+    const countParams = [];
+
+    if (status) {
+      query += ' AND p.status = ?';
+      countQuery += ' AND p.status = ?';
+      params.push(status);
+      countParams.push(status);
+    }
+
+    if (payment_status) {
+      query += ' AND p.payment_status = ?';
+      countQuery += ' AND p.payment_status = ?';
+      params.push(payment_status);
+      countParams.push(payment_status);
+    }
+
+    if (payment_method) {
+      query += ' AND p.payment_method = ?';
+      countQuery += ' AND p.payment_method = ?';
+      params.push(payment_method);
+      countParams.push(payment_method);
+    }
+
+    if (supplier) {
+      query += ' AND p.supplier = ?';
+      countQuery += ' AND p.supplier = ?';
+      params.push(supplier);
+      countParams.push(supplier);
+    }
+
+    if (search) {
+      query += ' AND (p.purchase_no LIKE ? OR p.item_name LIKE ? OR p.supplier LIKE ? OR p.category LIKE ?)';
+      countQuery += ' AND (p.purchase_no LIKE ? OR p.item_name LIKE ? OR p.supplier LIKE ? OR p.category LIKE ?)';
+      const pattern = `%${search}%`;
+      params.push(pattern, pattern, pattern, pattern);
+      countParams.push(pattern, pattern, pattern, pattern);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND p.purchase_date BETWEEN ? AND ?';
+      countQuery += ' AND p.purchase_date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY p.id DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [purchases] = await pool.query(query, params);
+
+    res.json({
+      purchases,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get purchases error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat data pembelian' });
+  }
+});
+
+// 2. Get purchase detail
+app.get('/api/purchases/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT p.*, 
+                pr.request_no,
+                u.name as created_by_name,
+                ii.stock as current_inventory_stock
+         FROM purchases p
+         LEFT JOIN purchase_requests pr ON p.request_id = pr.id
+         LEFT JOIN users u ON p.created_by = u.id
+         LEFT JOIN inventory_items ii ON p.inventory_item_id = ii.id
+         WHERE p.id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Get purchase detail error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// 3. Create purchase (Fitur Pembelian)
+app.post('/api/purchases', authenticateToken, authorizeRole('admin'), upload.single('invoice_proof'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const {
+      request_id,
+      purchase_date,
+      supplier,
+      category,
+      item_name,
+      inventory_item_id,
+      specification,
+      qty,
+      unit,
+      total_price,
+      payment_method = 'Tunai',
+      dp_amount = 0,
+      due_date,
+      status = 'Dipesan',
+      notes
+    } = req.body;
+
+    if (!supplier || !category || !item_name || !qty || !total_price) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Supplier, kategori, nama barang, jumlah, dan total harga wajib diisi' });
+    }
+
+    const parsedQty = parseFloat(qty);
+    const parsedTotal = parseFloat(total_price);
+    const unitPrice = parsedQty > 0 ? (parsedTotal / parsedQty) : 0;
+    const parsedDp = payment_method === 'DP' ? (parseFloat(dp_amount) || 0) : 0;
+    const remainingPayment = payment_method === 'DP' ? Math.max(0, parsedTotal - parsedDp) : 0;
+    const paymentStatus = payment_method === 'DP' ? (remainingPayment > 0 ? (parsedDp > 0 ? 'partial' : 'unpaid') : 'paid') : 'paid';
+
+    let invoiceProofUrl = null;
+    if (req.file) {
+      invoiceProofUrl = `/uploads/${req.file.filename}`;
+    }
+
+    const purchaseNo = await generatePurchaseNo(connection);
+    const pDate = purchase_date || new Date().toISOString().split('T')[0];
+
+    // Auto-link / create inventory item
+    let itemId = inventory_item_id ? parseInt(inventory_item_id) : null;
+    if (!itemId) {
+      const [found] = await connection.query(
+        'SELECT id FROM inventory_items WHERE LOWER(name) = LOWER(?) LIMIT 1',
+        [item_name.trim()]
+      );
+      if (found.length > 0) {
+        itemId = found[0].id;
+      } else {
+        const [created] = await connection.query(
+          'INSERT INTO inventory_items (category, name, unit, stock, min_stock, last_price, notes) VALUES (?, ?, ?, 0, 0, ?, ?)',
+          [category.trim(), item_name.trim(), unit.trim(), unitPrice, `Dibuat dari pembelian #${purchaseNo}`]
+        );
+        itemId = created.insertId;
+      }
+    }
+
+    // Update item's last_price in master inventory
+    if (itemId && unitPrice > 0) {
+      await connection.query('UPDATE inventory_items SET last_price = ? WHERE id = ?', [unitPrice, itemId]);
+    }
+
+    // Insert purchase
+    const [insertRes] = await connection.query(
+      `INSERT INTO purchases 
+         (purchase_no, request_id, purchase_date, supplier, category, item_name, inventory_item_id, specification, qty, unit, total_price, unit_price, invoice_proof_url, payment_method, dp_amount, remaining_payment, due_date, payment_status, status, notes, created_by) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        purchaseNo,
+        request_id ? parseInt(request_id) : null,
+        pDate,
+        supplier.trim(),
+        category.trim(),
+        item_name.trim(),
+        itemId,
+        specification || null,
+        parsedQty,
+        unit.trim(),
+        parsedTotal,
+        unitPrice,
+        invoiceProofUrl,
+        payment_method,
+        parsedDp,
+        remainingPayment,
+        due_date || null,
+        paymentStatus,
+        status,
+        notes || null,
+        req.user.id
+      ]
+    );
+
+    const purchaseId = insertRes.insertId;
+    const purchaseData = {
+      id: purchaseId,
+      purchase_no: purchaseNo,
+      purchase_date: pDate,
+      supplier,
+      item_name,
+      inventory_item_id: itemId,
+      total_price: parsedTotal,
+      payment_method,
+      dp_amount: parsedDp,
+      remaining_payment: remainingPayment,
+      invoice_proof_url: invoiceProofUrl
+    };
+
+    // 1. Integrasi Keuangan (Neraca & Arus Kas)
+    await recordPurchaseFinancials(connection, purchaseData, req.user.id);
+
+    // 2. Jika status langsung 'Diterima' atau 'Selesai', tambahkan stok persediaan
+    if (status === 'Diterima' || status === 'Selesai') {
+      const [currItem] = await connection.query(
+        'SELECT stock FROM inventory_items WHERE id = ? FOR UPDATE',
+        [itemId]
+      );
+      if (currItem.length > 0) {
+        const stockInitial = parseFloat(currItem[0].stock);
+        const stockFinal = stockInitial + parsedQty;
+
+        await connection.query('UPDATE inventory_items SET stock = ? WHERE id = ?', [stockFinal, itemId]);
+
+        await connection.query(
+          `INSERT INTO inventory_stock_logs 
+             (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+             VALUES (?, ?, ?, ?, 0, ?, ?, 'purchase', ?, ?)`,
+          [
+            itemId,
+            pDate,
+            stockInitial,
+            parsedQty,
+            stockFinal,
+            `Pembelian #${purchaseNo}: ${item_name} (${supplier})`,
+            purchaseId,
+            req.user.id
+          ]
+        );
+      }
+    }
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Pembelian berhasil dicatat dan terintegrasi ke sistem keuangan',
+      purchaseId,
+      purchaseNo
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create purchase error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mencatat pembelian' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 4. Update purchase status & return handling
+app.put('/api/purchases/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+    const {
+      status,
+      notes,
+      return_amount,
+      return_qty,
+      return_notes
+    } = req.body;
+
+    const [purchases] = await connection.query('SELECT * FROM purchases WHERE id = ? FOR UPDATE', [id]);
+    if (purchases.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
+    }
+
+    const current = purchases[0];
+    const previousStatus = current.status;
+
+    // Update purchase record
+    await connection.query(
+      `UPDATE purchases 
+         SET status = ?, notes = ?, return_amount = ?, return_qty = ?, return_notes = ? 
+         WHERE id = ?`,
+      [
+        status || current.status,
+        notes !== undefined ? notes : current.notes,
+        return_amount !== undefined ? (parseFloat(return_amount) || 0) : current.return_amount,
+        return_qty !== undefined ? (parseFloat(return_qty) || 0) : current.return_qty,
+        return_notes !== undefined ? return_notes : current.return_notes,
+        id
+      ]
+    );
+
+    // Jika status berubah menjadi 'Diterima' atau 'Selesai' dan sebelumnya belum pernah diterima
+    if (
+      (status === 'Diterima' || status === 'Selesai') &&
+      previousStatus !== 'Diterima' &&
+      previousStatus !== 'Selesai' &&
+      current.inventory_item_id
+    ) {
+      const [currItem] = await connection.query(
+        'SELECT stock FROM inventory_items WHERE id = ? FOR UPDATE',
+        [current.inventory_item_id]
+      );
+      if (currItem.length > 0) {
+        const stockInitial = parseFloat(currItem[0].stock);
+        const stockFinal = stockInitial + parseFloat(current.qty);
+
+        await connection.query('UPDATE inventory_items SET stock = ? WHERE id = ?', [stockFinal, current.inventory_item_id]);
+
+        await connection.query(
+          `INSERT INTO inventory_stock_logs 
+             (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+             VALUES (?, CURRENT_DATE, ?, ?, 0, ?, ?, 'purchase', ?, ?)`,
+          [
+            current.inventory_item_id,
+            stockInitial,
+            parseFloat(current.qty),
+            stockFinal,
+            `Penerimaan pembelian #${current.purchase_no}: ${current.item_name}`,
+            id,
+            req.user.id
+          ]
+        );
+      }
+    }
+
+    // Jika status menjadi 'Direturn' (Halaman 11 PDF)
+    if (status === 'Direturn') {
+      const retAmount = parseFloat(return_amount) || 0;
+      const retQty = parseFloat(return_qty) || 0;
+      await recordPurchaseReturnFinancials(connection, current, retAmount, retQty, return_notes, req.user.id);
+    }
+
+    await connection.commit();
+
+    res.json({ message: 'Data pembelian berhasil diperbarui' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update purchase error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui pembelian' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 5. Pelunasan DP Pembelian (Halaman 6 PDF)
+app.post('/api/purchases/:id/pay-remaining', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+
+    const [purchases] = await connection.query('SELECT * FROM purchases WHERE id = ? FOR UPDATE', [id]);
+    if (purchases.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
+    }
+
+    const purchase = purchases[0];
+    const remaining = parseFloat(purchase.remaining_payment) || 0;
+
+    if (remaining <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Pembelian ini sudah lunas' });
+    }
+
+    // Record Pelunasan (Neraca & Arus Kas)
+    await recordPurchaseDpSettlement(connection, purchase, req.user.id);
+
+    // Update purchase record to paid
+    await connection.query(
+      'UPDATE purchases SET remaining_payment = 0, payment_status = "paid" WHERE id = ?',
+      [id]
+    );
+
+    await connection.commit();
+
+    res.json({ message: 'Pelunasan sisa pembayaran pembelian berhasil dicatat' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Pay remaining purchase error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mencatat pelunasan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 6. Delete purchase
+app.delete('/api/purchases/:id', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [purchases] = await pool.query('SELECT id FROM purchases WHERE id = ?', [id]);
+    if (purchases.length === 0) {
+      return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
+    }
+
+    await pool.query('DELETE FROM purchases WHERE id = ?', [id]);
+    res.json({ message: 'Data pembelian berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete purchase error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus data pembelian' });
+  }
+});
+
+// ==========================================
+// 3. PURCHASE REQUESTS (PENGAJUAN) ROUTES
+// ==========================================
+// Get purchase requests list
+app.get('/api/purchase-requests', authenticateToken, async (req, res) => {
+  try {
+    const {
+      approval_status,
+      receipt_status,
+      priority,
+      search,
+      start_date,
+      end_date,
+      limit = 20,
+      offset = 0
+    } = req.query;
+
+    let query = `
+        SELECT pr.*, 
+               u.name as created_by_name, 
+               ap.name as approved_by_name,
+               ii.stock as current_inventory_stock
+        FROM purchase_requests pr
+        LEFT JOIN users u ON pr.created_by = u.id
+        LEFT JOIN users ap ON pr.approved_by = ap.id
+        LEFT JOIN inventory_items ii ON pr.inventory_item_id = ii.id
+        WHERE 1=1
+      `;
+    let countQuery = `
+        SELECT COUNT(*) as total 
+        FROM purchase_requests pr 
+        WHERE 1=1
+      `;
+
+    const params = [];
+    const countParams = [];
+
+    if (approval_status) {
+      query += ' AND pr.approval_status = ?';
+      countQuery += ' AND pr.approval_status = ?';
+      params.push(approval_status);
+      countParams.push(approval_status);
+    }
+
+    if (receipt_status) {
+      query += ' AND pr.receipt_status = ?';
+      countQuery += ' AND pr.receipt_status = ?';
+      params.push(receipt_status);
+      countParams.push(receipt_status);
+    }
+
+    if (priority) {
+      query += ' AND pr.priority = ?';
+      countQuery += ' AND pr.priority = ?';
+      params.push(priority);
+      countParams.push(priority);
+    }
+
+    if (search) {
+      query += ' AND (pr.request_no LIKE ? OR pr.item_name LIKE ? OR pr.category LIKE ? OR pr.reason LIKE ?)';
+      countQuery += ' AND (pr.request_no LIKE ? OR pr.item_name LIKE ? OR pr.category LIKE ? OR pr.reason LIKE ?)';
+      const pattern = `%${search}%`;
+      params.push(pattern, pattern, pattern, pattern);
+      countParams.push(pattern, pattern, pattern, pattern);
+    }
+
+    if (start_date && end_date) {
+      query += ' AND pr.request_date BETWEEN ? AND ?';
+      countQuery += ' AND pr.request_date BETWEEN ? AND ?';
+      params.push(start_date, end_date);
+      countParams.push(start_date, end_date);
+    }
+
+    const [countResult] = await pool.query(countQuery, countParams);
+    const total = countResult[0].total || 0;
+
+    query += ' ORDER BY pr.id DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [requests] = await pool.query(query, params);
+
+    res.json({
+      requests,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get purchase requests error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat pengajuan pembelian' });
+  }
+});
+
+// Get purchase request detail
+app.get('/api/purchase-requests/:id', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT pr.*, 
+                u.name as created_by_name, 
+                ap.name as approved_by_name,
+                ii.stock as current_inventory_stock
+         FROM purchase_requests pr
+         LEFT JOIN users u ON pr.created_by = u.id
+         LEFT JOIN users ap ON pr.approved_by = ap.id
+         LEFT JOIN inventory_items ii ON pr.inventory_item_id = ii.id
+         WHERE pr.id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pengajuan pembelian tidak ditemukan' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Get purchase request detail error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Create new purchase request (Dapur, Operasional, Admin)
+app.post('/api/purchase-requests', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const {
+      request_date,
+      category,
+      item_name,
+      inventory_item_id,
+      specification,
+      qty,
+      unit,
+      needed_date,
+      reason,
+      priority = 'Normal'
+    } = req.body;
+
+    if (!category || !item_name || !qty || !unit) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Kategori, nama barang, jumlah, dan satuan wajib diisi' });
+    }
+
+    const requestNo = await generateRequestNo(connection);
+    const reqDate = request_date || new Date().toISOString().split('T')[0];
+
+    // Auto-link to inventory_item_id if not provided but matches name
+    let resolvedItemId = inventory_item_id ? parseInt(inventory_item_id) : null;
+    if (!resolvedItemId) {
+      const [matched] = await connection.query(
+        'SELECT id FROM inventory_items WHERE LOWER(name) = LOWER(?) LIMIT 1',
+        [item_name.trim()]
+      );
+      if (matched.length > 0) {
+        resolvedItemId = matched[0].id;
+      }
+    }
+
+    const [result] = await connection.query(
+      `INSERT INTO purchase_requests 
+         (request_no, request_date, category, item_name, inventory_item_id, specification, qty, unit, needed_date, reason, priority, approval_status, receipt_status, created_by, created_role) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Menunggu', 'Belum Diterima', ?, ?)`,
+      [
+        requestNo,
+        reqDate,
+        category.trim(),
+        item_name.trim(),
+        resolvedItemId,
+        specification || null,
+        parseFloat(qty),
+        unit.trim(),
+        needed_date || null,
+        reason || null,
+        priority,
+        req.user.id,
+        req.user.role || 'dapur'
+      ]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Pengajuan pembelian berhasil dibuat',
+      requestId: result.insertId,
+      requestNo
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create purchase request error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat membuat pengajuan pembelian' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Update purchase request (Only if still Menunggu or by Admin)
+app.put('/api/purchase-requests/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      category,
+      item_name,
+      inventory_item_id,
+      specification,
+      qty,
+      unit,
+      needed_date,
+      reason,
+      priority
+    } = req.body;
+
+    const [rows] = await pool.query('SELECT * FROM purchase_requests WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pengajuan pembelian tidak ditemukan' });
+    }
+
+    await pool.query(
+      `UPDATE purchase_requests 
+         SET category = ?, item_name = ?, inventory_item_id = ?, specification = ?, qty = ?, unit = ?, needed_date = ?, reason = ?, priority = ? 
+         WHERE id = ?`,
+      [
+        category.trim(),
+        item_name.trim(),
+        inventory_item_id || null,
+        specification || null,
+        parseFloat(qty),
+        unit.trim(),
+        needed_date || null,
+        reason || null,
+        priority,
+        id
+      ]
+    );
+
+    res.json({ message: 'Pengajuan pembelian berhasil diperbarui' });
+  } catch (error) {
+    console.error('Update purchase request error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui pengajuan pembelian' });
+  }
+});
+
+// Approval Update - Admin only (Halaman 5 PDF)
+// Status: Dibatalkan / Menunggu / Disetujui / Ditolak / Ditunda
+app.put('/api/purchase-requests/:id/approval', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approval_status, approval_notes } = req.body;
+
+    const validStatuses = ['Menunggu', 'Disetujui', 'Ditolak', 'Ditunda', 'Dibatalkan'];
+    if (!validStatuses.includes(approval_status)) {
+      return res.status(400).json({ message: 'Status approval tidak valid' });
+    }
+
+    const [rows] = await pool.query('SELECT id FROM purchase_requests WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pengajuan pembelian tidak ditemukan' });
+    }
+
+    await pool.query(
+      `UPDATE purchase_requests 
+         SET approval_status = ?, approval_notes = ?, approved_by = ? 
+         WHERE id = ?`,
+      [approval_status, approval_notes || null, req.user.id, id]
+    );
+
+    res.json({ message: `Status approval berhasil diperbarui menjadi ${approval_status}` });
+  } catch (error) {
+    console.error('Approval update error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui status approval' });
+  }
+});
+
+// Receipt Update - Dapur, Operasional, Admin (Halaman 5 & 11 PDF)
+// Status penerimaan: Diterima sebagian, Diterima, Ditolak
+// Apabila barang diterima, otomatis stok di sistem bertambah (stok persediaan & tracking kartu stok)
+app.put('/api/purchase-requests/:id/receipt', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+    const { receipt_status, received_qty, receipt_notes, update_stock = true } = req.body;
+
+    const validStatuses = ['Belum Diterima', 'Diterima Sebagian', 'Diterima', 'Ditolak'];
+    if (!validStatuses.includes(receipt_status)) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Status penerimaan tidak valid' });
+    }
+
+    const [rows] = await connection.query('SELECT * FROM purchase_requests WHERE id = ? FOR UPDATE', [id]);
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Pengajuan pembelian tidak ditemukan' });
+    }
+
+    const request = rows[0];
+    const previousReceiptStatus = request.receipt_status;
+    const qtyReceived = received_qty !== undefined && received_qty !== null ? parseFloat(received_qty) : parseFloat(request.qty);
+
+    await connection.query(
+      `UPDATE purchase_requests 
+         SET receipt_status = ?, received_qty = ?, receipt_notes = ? 
+         WHERE id = ?`,
+      [receipt_status, qtyReceived, receipt_notes || null, id]
+    );
+
+    // Jika barang diterima dan update_stock aktif, tambahkan ke stok persediaan
+    if (
+      update_stock &&
+      (receipt_status === 'Diterima' || receipt_status === 'Diterima Sebagian') &&
+      previousReceiptStatus !== 'Diterima' &&
+      qtyReceived > 0
+    ) {
+      let itemId = request.inventory_item_id;
+
+      // Jika belum ada inventory_item_id, buat atau cari item
+      if (!itemId) {
+        const [found] = await connection.query(
+          'SELECT id, stock FROM inventory_items WHERE LOWER(name) = LOWER(?) LIMIT 1',
+          [request.item_name.trim()]
+        );
+        if (found.length > 0) {
+          itemId = found[0].id;
+        } else {
+          const [created] = await connection.query(
+            'INSERT INTO inventory_items (category, name, unit, stock, min_stock, notes) VALUES (?, ?, ?, 0, 0, ?)',
+            [request.category, request.item_name, request.unit, `Dibuat dari pengajuan #${request.request_no}`]
+          );
+          itemId = created.insertId;
+        }
+        await connection.query('UPDATE purchase_requests SET inventory_item_id = ? WHERE id = ?', [itemId, id]);
+      }
+
+      const [itemRows] = await connection.query(
+        'SELECT stock FROM inventory_items WHERE id = ? FOR UPDATE',
+        [itemId]
+      );
+
+      if (itemRows.length > 0) {
+        const stockInitial = parseFloat(itemRows[0].stock);
+        const stockFinal = stockInitial + qtyReceived;
+
+        await connection.query(
+          'UPDATE inventory_items SET stock = ? WHERE id = ?',
+          [stockFinal, itemId]
+        );
+
+        await connection.query(
+          `INSERT INTO inventory_stock_logs 
+             (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+             VALUES (?, CURRENT_DATE, ?, ?, 0, ?, ?, 'purchase', ?, ?)`,
+          [
+            itemId,
+            stockInitial,
+            qtyReceived,
+            stockFinal,
+            `Penerimaan pengajuan pembelian #${request.request_no}: ${request.item_name}`,
+            id,
+            req.user.id
+          ]
+        );
+      }
+    }
+
+    await connection.commit();
+
+    res.json({ message: 'Status penerimaan barang berhasil diperbarui' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Receipt update error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui status penerimaan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// Delete purchase request
+app.delete('/api/purchase-requests/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await pool.query('SELECT * FROM purchase_requests WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pengajuan pembelian tidak ditemukan' });
+    }
+
+    if (req.user.role !== 'admin' && rows[0].created_by !== req.user.id) {
+      return res.status(403).json({ message: 'Anda tidak memiliki hak untuk menghapus pengajuan ini' });
+    }
+
+    await pool.query('DELETE FROM purchase_requests WHERE id = ?', [id]);
+    res.json({ message: 'Pengajuan pembelian berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete purchase request error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus pengajuan pembelian' });
+  }
+});
+
+// ==========================================
+// 4. ORDER COSTS & MATERIALS (HPP) ROUTES
+// ==========================================
+// 1. Get all costs (Modal Langsung) for an order
+app.get('/api/orders/:id/costs', authenticateToken, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const [costs] = await pool.query(
+      `SELECT oc.*, u.name as created_by_name 
+         FROM order_costs oc 
+         LEFT JOIN users u ON oc.created_by = u.id 
+         WHERE oc.order_id = ? 
+         ORDER BY oc.id ASC`,
+      [orderId]
+    );
+    res.json(costs);
+  } catch (error) {
+    console.error('Get order costs error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat biaya modal pesanan' });
+  }
+});
+
+// 2. Add a cost (Modal Langsung) for an order
+app.post('/api/orders/:id/costs', authenticateToken, upload.single('receipt'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const orderId = req.params.id;
+    const { amount, description } = req.body;
+
+    if (!amount || parseFloat(amount) <= 0) {
+      return res.status(400).json({ message: 'Harga/biaya modal harus lebih dari 0' });
+    }
+
+    const costAmount = parseFloat(amount);
+    const costDesc = description || `Biaya modal pesanan #${orderId}`;
+    let proofImageUrl = null;
+
+    if (req.file) {
+      proofImageUrl = `/uploads/${req.file.filename}`;
+    }
+
+    // Check order
+    const [orders] = await connection.query('SELECT id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    // Integrasi ke Keuangan (Halaman 8 PDF):
+    // 1. Neraca: Debit: HPP, Kredit: Kas
+    const [journalRes] = await connection.query(
+      `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'order_cost', ?, ?, 'HPP', 'Kas', ?, ?)`,
+      [orderId, `Modal pesanan #${orderId}: ${costDesc}`, costAmount, req.user.id]
+    );
+    const journalId = journalRes.insertId;
+
+    // 2. Arus Kas: Kategori Operasi - Biaya Operasional (Pengeluaran)
+    const [cfRes] = await connection.query(
+      `INSERT INTO cash_flow_transactions 
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, proof_image_url, created_by) 
+         VALUES ('expense', 'operasi', 'Biaya operasional', 'HPP', 'Kas', ?, ?, ?, ?, ?)`,
+      [costAmount, `Biaya modal pesanan #${orderId}: ${costDesc}`, orderId, proofImageUrl, req.user.id]
+    );
+    const cashFlowId = cfRes.insertId;
+
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'expense', ?, ?, 'operasi', 'Biaya operasional', 'HPP', 'Kas', 'created')`,
+      [cashFlowId, req.user.id, costAmount, `Biaya modal pesanan #${orderId}: ${costDesc}`]
+    );
+
+    // 3. Simpan ke order_costs
+    const [costRes] = await connection.query(
+      `INSERT INTO order_costs 
+         (order_id, amount, description, proof_image_url, cash_flow_id, journal_id, created_by) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, costAmount, costDesc, proofImageUrl, cashFlowId, journalId, req.user.id]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Biaya modal berhasil ditambahkan',
+      costId: costRes.insertId
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add order cost error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambahkan biaya modal' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 3. Delete a cost (Modal Langsung) for an order
+app.delete('/api/orders/:id/costs/:costId', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id: orderId, costId } = req.params;
+
+    const [costs] = await connection.query(
+      'SELECT * FROM order_costs WHERE id = ? AND order_id = ?',
+      [costId, orderId]
+    );
+
+    if (costs.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Data modal tidak ditemukan' });
+    }
+
+    const cost = costs[0];
+
+    // Remove associated journal entry
+    if (cost.journal_id) {
+      await connection.query('DELETE FROM accounting_journal_entries WHERE id = ?', [cost.journal_id]);
+    }
+
+    // Remove associated cash flow entry
+    if (cost.cash_flow_id) {
+      await connection.query('DELETE FROM cash_flow_transactions WHERE id = ?', [cost.cash_flow_id]);
+    }
+
+    // Delete record
+    await connection.query('DELETE FROM order_costs WHERE id = ?', [costId]);
+
+    await connection.commit();
+    res.json({ message: 'Biaya modal berhasil dihapus' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete order cost error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus biaya modal' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 4. Get all materials used (Bahan Baku Persediaan) for an order
+app.get('/api/orders/:id/materials', authenticateToken, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const [materials] = await pool.query(
+      `SELECT om.*, ii.stock as current_stock, u.name as created_by_name 
+         FROM order_materials om 
+         LEFT JOIN inventory_items ii ON om.inventory_item_id = ii.id 
+         LEFT JOIN users u ON om.created_by = u.id 
+         WHERE om.order_id = ? 
+         ORDER BY om.id ASC`,
+      [orderId]
+    );
+    res.json(materials);
+  } catch (error) {
+    console.error('Get order materials error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat bahan baku pesanan' });
+  }
+});
+
+// 5. Add material used (Bahan Baku Persediaan) for an order
+app.post('/api/orders/:id/materials', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const orderId = req.params.id;
+    const { inventory_item_id, quantity } = req.body;
+
+    if (!inventory_item_id || !quantity || parseFloat(quantity) <= 0) {
+      return res.status(400).json({ message: 'Barang persediaan dan jumlah valid wajib dipilih' });
+    }
+
+    const qty = parseFloat(quantity);
+
+    // Check item in inventory
+    const [items] = await connection.query(
+      'SELECT id, name, category, unit, stock, last_price FROM inventory_items WHERE id = ? FOR UPDATE',
+      [inventory_item_id]
+    );
+
+    if (items.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
+    }
+
+    const item = items[0];
+    const stockInitial = parseFloat(item.stock);
+    const stockFinal = stockInitial - qty;
+    const unitPrice = parseFloat(item.last_price || 0);
+    const subtotal = qty * unitPrice;
+
+    // 1. Kurangi stok persediaan
+    await connection.query(
+      'UPDATE inventory_items SET stock = ? WHERE id = ?',
+      [stockFinal, inventory_item_id]
+    );
+
+    // 2. Tracking Stok Persediaan (inventory_stock_logs)
+    await connection.query(
+      `INSERT INTO inventory_stock_logs 
+         (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+         VALUES (?, CURRENT_DATE, ?, 0, ?, ?, ?, 'order', ?, ?)`,
+      [inventory_item_id, stockInitial, qty, stockFinal, `Bahan baku pesanan #${orderId}`, orderId, req.user.id]
+    );
+
+    // 3. Neraca: Debit: HPP, Kredit: Persediaan (jika subtotal > 0)
+    let journalId = null;
+    if (subtotal > 0) {
+      const [jRes] = await connection.query(
+        `INSERT INTO accounting_journal_entries 
+           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+           VALUES (CURRENT_DATE, 'order', ?, ?, 'HPP', 'Persediaan', ?, ?)`,
+        [orderId, `Pemakaian bahan baku pesanan #${orderId}: ${item.name} (${qty} ${item.unit})`, subtotal, req.user.id]
+      );
+      journalId = jRes.insertId;
+    }
+
+    // 4. Simpan ke order_materials
+    const [matRes] = await connection.query(
+      `INSERT INTO order_materials 
+         (order_id, inventory_item_id, item_name, category, quantity, unit, unit_price, subtotal, journal_id, created_by) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, inventory_item_id, item.name, item.category, qty, item.unit, unitPrice, subtotal, journalId, req.user.id]
+    );
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Bahan baku berhasil dicatat dan stok berhasil dikurangi',
+      materialId: matRes.insertId
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add order material error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambahkan bahan baku' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 6. Delete material used for an order (Kembalikan stok)
+app.delete('/api/orders/:id/materials/:materialId', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const { id: orderId, materialId } = req.params;
+
+    const [materials] = await connection.query(
+      'SELECT * FROM order_materials WHERE id = ? AND order_id = ?',
+      [materialId, orderId]
+    );
+
+    if (materials.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Data bahan baku tidak ditemukan' });
+    }
+
+    const mat = materials[0];
+
+    // Kembalikan stok di inventory_items
+    const [items] = await connection.query(
+      'SELECT stock FROM inventory_items WHERE id = ? FOR UPDATE',
+      [mat.inventory_item_id]
+    );
+
+    if (items.length > 0) {
+      const stockInitial = parseFloat(items[0].stock);
+      const qty = parseFloat(mat.quantity);
+      const stockFinal = stockInitial + qty;
+
+      await connection.query(
+        'UPDATE inventory_items SET stock = ? WHERE id = ?',
+        [stockFinal, mat.inventory_item_id]
+      );
+
+      // Catat pengembalian di kartu stok
+      await connection.query(
+        `INSERT INTO inventory_stock_logs 
+           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+           VALUES (?, CURRENT_DATE, ?, ?, 0, ?, ?, 'manual', ?, ?)`,
+        [mat.inventory_item_id, stockInitial, qty, stockFinal, `Batal pemakaian bahan pesanan #${orderId}`, orderId, req.user.id]
+      );
+    }
+
+    // Hapus jurnal jika ada
+    if (mat.journal_id) {
+      await connection.query('DELETE FROM accounting_journal_entries WHERE id = ?', [mat.journal_id]);
+    }
+
+    // Hapus record
+    await connection.query('DELETE FROM order_materials WHERE id = ?', [materialId]);
+
+    await connection.commit();
+    res.json({ message: 'Bahan baku berhasil dihapus dan stok dikembalikan' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete order material error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus bahan baku' });
+  } finally {
+    connection.release();
+  }
+});
+
+// ==========================================
+// 5. LABA RUGI ROUTES
+// ==========================================
+/**
+   * Get Laba Rugi Summary & Breakdown
+   * Query params:
+   * - start_date (YYYY-MM-DD)
+   * - end_date (YYYY-MM-DD)
+   * - month (1-12)
+   * - year (YYYY)
+   */
+app.get('/api/laba-rugi/summary', authenticateToken, authorizeRole('admin'), async (req, res) => {
+  try {
+    const { start_date, end_date, month, year } = req.query;
+
+    let dateFilterOrder = '';
+    let dateFilterCosts = '';
+    let dateFilterMaterials = '';
+    let dateFilterCashFlow = '';
+    const orderParams = [];
+    const costParams = [];
+    const matParams = [];
+    const cfParams = [];
+
+    if (start_date && end_date) {
+      dateFilterOrder = ' AND DATE(o.created_at) BETWEEN ? AND ?';
+      dateFilterCosts = ' AND DATE(oc.created_at) BETWEEN ? AND ?';
+      dateFilterMaterials = ' AND DATE(om.created_at) BETWEEN ? AND ?';
+      dateFilterCashFlow = ' AND DATE(cft.created_at) BETWEEN ? AND ?';
+
+      orderParams.push(start_date, end_date);
+      costParams.push(start_date, end_date);
+      matParams.push(start_date, end_date);
+      cfParams.push(start_date, end_date);
+    } else if (month && year) {
+      dateFilterOrder = ' AND MONTH(o.created_at) = ? AND YEAR(o.created_at) = ?';
+      dateFilterCosts = ' AND MONTH(oc.created_at) = ? AND YEAR(oc.created_at) = ?';
+      dateFilterMaterials = ' AND MONTH(om.created_at) = ? AND YEAR(om.created_at) = ?';
+      dateFilterCashFlow = ' AND MONTH(cft.created_at) = ? AND YEAR(cft.created_at) = ?';
+
+      orderParams.push(month, year);
+      costParams.push(month, year);
+      matParams.push(month, year);
+      cfParams.push(month, year);
+    } else if (year) {
+      dateFilterOrder = ' AND YEAR(o.created_at) = ?';
+      dateFilterCosts = ' AND YEAR(oc.created_at) = ?';
+      dateFilterMaterials = ' AND YEAR(om.created_at) = ?';
+      dateFilterCashFlow = ' AND YEAR(cft.created_at) = ?';
+
+      orderParams.push(year);
+      costParams.push(year);
+      matParams.push(year);
+      cfParams.push(year);
+    }
+
+    // 1. PENDAPATAN
+    // Pesanan aktif (bukan batal)
+    const [orderRows] = await pool.query(
+      `SELECT 
+           COALESCE(SUM(o.final_amount), 0) as gross_sales,
+           COUNT(*) as order_count
+         FROM orders o
+         WHERE o.status != 'dibatalkan' ${dateFilterOrder}`,
+      orderParams
+    );
+    const grossSales = parseFloat(orderRows[0].gross_sales || 0);
+    const orderCount = parseInt(orderRows[0].order_count || 0);
+
+    // Pembatalan penjualan (dana yang dikembalikan jika ada)
+    const [refundRows] = await pool.query(
+      `SELECT 
+           COALESCE(SUM(o.refund_amount), 0) as total_refunds,
+           COUNT(*) as cancelled_count
+         FROM orders o
+         WHERE o.status = 'dibatalkan' AND o.refund_amount > 0 ${dateFilterOrder}`,
+      orderParams
+    );
+    const totalRefunds = parseFloat(refundRows[0].total_refunds || 0);
+    const cancelledCount = parseInt(refundRows[0].cancelled_count || 0);
+
+    const netSales = Math.max(0, grossSales - totalRefunds);
+
+    // Rincian Pesanan Penjualan
+    const [ordersList] = await pool.query(
+      `SELECT 
+           o.id, 
+           o.final_amount, 
+           o.payment_method, 
+           o.payment_status, 
+           o.status, 
+           o.created_at,
+           COALESCE(o.guest_customer_name, u.name, 'Customer') as customer_name,
+           o.guest_event_name as event_name
+         FROM orders o
+         LEFT JOIN users u ON o.user_id = u.id
+         WHERE o.status != 'dibatalkan' ${dateFilterOrder}
+         ORDER BY o.created_at DESC LIMIT 50`,
+      orderParams
+    );
+
+    // 2. BEBAN
+    // A. HPP Bahan (Modal Langsung Pesanan dari order_costs)
+    const [directCostRows] = await pool.query(
+      `SELECT 
+           COALESCE(SUM(oc.amount), 0) as total_direct_costs,
+           COUNT(*) as direct_cost_count
+         FROM order_costs oc
+         WHERE 1=1 ${dateFilterCosts}`,
+      costParams
+    );
+    const totalDirectCosts = parseFloat(directCostRows[0].total_direct_costs || 0);
+    const directCostCount = parseInt(directCostRows[0].direct_cost_count || 0);
+
+    const [directCostsList] = await pool.query(
+      `SELECT oc.*, u.name as created_by_name
+         FROM order_costs oc
+         LEFT JOIN users u ON oc.created_by = u.id
+         WHERE 1=1 ${dateFilterCosts}
+         ORDER BY oc.created_at DESC LIMIT 50`,
+      costParams
+    );
+
+    // B. Bahan Persediaan Terpakai (order_materials)
+    const [materialRows] = await pool.query(
+      `SELECT 
+           COALESCE(SUM(om.subtotal), 0) as total_inventory_used,
+           COUNT(*) as material_count
+         FROM order_materials om
+         WHERE 1=1 ${dateFilterMaterials}`,
+      matParams
+    );
+    const totalInventoryUsed = parseFloat(materialRows[0].total_inventory_used || 0);
+    const materialCount = parseInt(materialRows[0].material_count || 0);
+
+    const [materialsList] = await pool.query(
+      `SELECT om.*, u.name as created_by_name
+         FROM order_materials om
+         LEFT JOIN users u ON om.created_by = u.id
+         WHERE 1=1 ${dateFilterMaterials}
+         ORDER BY om.created_at DESC LIMIT 50`,
+      matParams
+    );
+
+    // Total HPP (Beban Pokok Penjualan)
+    const totalHPP = totalDirectCosts + totalInventoryUsed;
+    const grossProfit = netSales - totalHPP;
+
+    // C. Biaya Operasional (Arus Kas: type='expense', activity_category='operasi', sub_category='Biaya operasional' ATAU order_id IS NULL)
+    const [opExpenseRows] = await pool.query(
+      `SELECT 
+           COALESCE(SUM(cft.amount), 0) as total_operational_expense,
+           COUNT(*) as op_expense_count
+         FROM cash_flow_transactions cft
+         WHERE cft.type = 'expense' 
+           AND cft.activity_category = 'operasi'
+           AND (cft.sub_category = 'Biaya operasional' OR cft.sub_category IS NULL)
+           AND cft.order_id IS NULL ${dateFilterCashFlow}`,
+      cfParams
+    );
+    const totalOperationalExpense = parseFloat(opExpenseRows[0].total_operational_expense || 0);
+    const opExpenseCount = parseInt(opExpenseRows[0].op_expense_count || 0);
+
+    const [opExpensesList] = await pool.query(
+      `SELECT cft.*, u.name as created_by_name
+         FROM cash_flow_transactions cft
+         LEFT JOIN users u ON cft.created_by = u.id
+         WHERE cft.type = 'expense' 
+           AND cft.activity_category = 'operasi'
+           AND (cft.sub_category = 'Biaya operasional' OR cft.sub_category IS NULL)
+           AND cft.order_id IS NULL ${dateFilterCashFlow}
+         ORDER BY cft.created_at DESC LIMIT 50`,
+      cfParams
+    );
+
+    // 3. LABA / RUGI BERSIH
+    // Total Beban = HPP + Biaya Operasional
+    const totalBeban = totalHPP + totalOperationalExpense;
+    const labaBersih = netSales - totalBeban;
+    const profitMargin = netSales > 0 ? (labaBersih / netSales) * 100 : 0;
+    const grossMargin = netSales > 0 ? (grossProfit / netSales) * 100 : 0;
+
+    res.json({
+      summary: {
+        netSales,
+        grossSales,
+        totalRefunds,
+        orderCount,
+        cancelledCount,
+        // Beban HPP
+        totalDirectCosts,
+        directCostCount,
+        totalInventoryUsed,
+        materialCount,
+        totalHPP,
+        grossProfit,
+        grossMargin,
+        // Beban Operasional
+        totalOperationalExpense,
+        opExpenseCount,
+        // Laba Bersih
+        totalBeban,
+        labaBersih,
+        isProfit: labaBersih >= 0,
+        profitMargin
+      },
+      breakdown: {
+        orders: ordersList,
+        directCosts: directCostsList,
+        materialsUsed: materialsList,
+        operationalExpenses: opExpensesList
+      }
+    });
+  } catch (error) {
+    console.error('Get laba rugi summary error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat data laba rugi' });
+  }
+});
+
 
 // Helper function to return default operasional checklist structure
 function getDefaultOperasionalChecklist() {
@@ -4360,3 +6964,10 @@ function getDefaultChecklist() {
     ]
   };
 }
+
+module.exports = app;
+
+
+// app.listen(PORT, () => {
+//   console.log(`Server berjalan di http://localhost:${PORT}`);
+// });

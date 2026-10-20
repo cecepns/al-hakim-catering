@@ -27,6 +27,11 @@ import AdminReviews from './pages/admin/Reviews';
 import AdminChecklist from './pages/admin/Checklist';
 import AdminCommissionWithdrawals from './pages/admin/CommissionWithdrawals';
 import CashFlow from './pages/admin/CashFlow';
+import AdminNeraca from './pages/admin/Neraca';
+import AdminLabaRugi from './pages/admin/LabaRugi';
+import AdminPurchases from './pages/admin/Purchases';
+import InventoryManagement from './pages/shared/InventoryManagement';
+import PurchaseRequests from './pages/shared/PurchaseRequests';
 import AdminCart from './pages/admin/Cart';
 
 // Pembeli Pages
@@ -212,6 +217,46 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/admin/neraca"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminNeraca />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/laba-rugi"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminLabaRugi />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/inventory"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <InventoryManagement role="admin" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/purchase-requests"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <PurchaseRequests role="admin" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/purchases"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <AdminPurchases />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/admin/cart"
         element={
           <ProtectedRoute allowedRoles={['admin']}>
@@ -369,6 +414,22 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/operasional/purchase-requests"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <PurchaseRequests role="operasional" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/operasional/inventory"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <InventoryManagement role="operasional" />
+          </ProtectedRoute>
+        }
+      />
 
       {/* Dapur Routes - Tanpa Navbar & Footer */}
       <Route
@@ -392,6 +453,22 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['dapur']}>
             <DapurOrderDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dapur/purchase-requests"
+        element={
+          <ProtectedRoute allowedRoles={['dapur']}>
+            <PurchaseRequests role="dapur" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dapur/inventory"
+        element={
+          <ProtectedRoute allowedRoles={['dapur']}>
+            <InventoryManagement role="dapur" />
           </ProtectedRoute>
         }
       />

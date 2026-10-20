@@ -5,6 +5,7 @@ import { formatRupiah, parseDeliveryNotes, formatDate } from '../../utils/format
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 import InvoiceModal from '../../components/InvoiceModal';
+import OrderCostManagement from '../../components/OrderCostManagement';
 
 const AdminOrderDetail = () => {
   const { id } = useParams();
@@ -17,6 +18,9 @@ const AdminOrderDetail = () => {
   const [notes, setNotes] = useState('');
   const [proofFile, setProofFile] = useState(null);
   const [proofPreview, setProofPreview] = useState(null);
+  const [isRefund, setIsRefund] = useState(false);
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundNotes, setRefundNotes] = useState('');
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
@@ -106,6 +110,12 @@ const AdminOrderDetail = () => {
         formData.append('proof', proofFile);
       }
       
+      // Integrasi Pembatalan Pesanan dengan Refund (Halaman 9 & 10 PDF)
+      if (newStatus === 'dibatalkan' && isRefund && refundAmount) {
+        formData.append('refund_amount', refundAmount);
+        formData.append('refund_notes', refundNotes || notes || 'Pengembalian dana pembatalan pesanan');
+      }
+
       await orderAPI.updateStatus(id, formData);
       alert('Status pesanan berhasil diupdate');
       setStatusModal(false);
@@ -113,6 +123,9 @@ const AdminOrderDetail = () => {
       setNotes('');
       setProofFile(null);
       setProofPreview(null);
+      setIsRefund(false);
+      setRefundAmount('');
+      setRefundNotes('');
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -584,6 +597,8 @@ const AdminOrderDetail = () => {
                 </div>
               </div>
             )}
+            {/* MODAL & HPP PESANAN (Halaman 8 & 9 PDF) */}
+            <OrderCostManagement orderId={id} onUpdated={fetchOrder} />
           </div>
 
           {/* Actions */}
@@ -613,7 +628,7 @@ const AdminOrderDetail = () => {
         {/* Status Update Modal */}
         {statusModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Status Pesanan</h3>
               <div className="space-y-4">
                 <div>
@@ -622,7 +637,17 @@ const AdminOrderDetail = () => {
                   </label>
                   <select
                     value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewStatus(val);
+                      if (val === 'dibatalkan') {
+                        setIsRefund(false);
+                        const defaultRefund = parseFloat(order?.payment_amount || 0) > 0 
+                          ? order.payment_amount 
+                          : (parseFloat(order?.final_amount || 0));
+                        setRefundAmount(defaultRefund || '');
+                      }
+                    }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">Pilih Status</option>
@@ -633,6 +658,63 @@ const AdminOrderDetail = () => {
                     <option value="dibatalkan">Dibatalkan</option>
                   </select>
                 </div>
+
+                {/* Seksi Khusus Pembatalan & Refund (Halaman 9 & 10 PDF) */}
+                {newStatus === 'dibatalkan' && (
+                  <div className="bg-red-50 border border-red-200 p-4 rounded-xl space-y-3">
+                    <div className="flex items-start space-x-2">
+                      <input
+                        type="checkbox"
+                        id="isRefundCheckbox"
+                        checked={isRefund}
+                        onChange={(e) => setIsRefund(e.target.checked)}
+                        className="mt-0.5 rounded border-gray-300 text-red-600 focus:ring-red-500 h-4 w-4"
+                      />
+                      <label htmlFor="isRefundCheckbox" className="text-xs font-semibold text-red-900 cursor-pointer">
+                        Pembayaran dikembalikan ke pelanggan (Refund dana)
+                      </label>
+                    </div>
+
+                    {isRefund ? (
+                      <div className="space-y-2 pt-1 border-t border-red-200">
+                        <div>
+                          <label className="block text-xs font-medium text-red-800 mb-1">
+                            Nominal Pengembalian Dana (Rp) <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="any"
+                            value={refundAmount}
+                            onChange={(e) => setRefundAmount(e.target.value)}
+                            placeholder="0"
+                            className="w-full px-3 py-1.5 text-sm border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-red-800 mb-1">
+                            Catatan Refund / Alasan
+                          </label>
+                          <input
+                            type="text"
+                            value={refundNotes}
+                            onChange={(e) => setRefundNotes(e.target.value)}
+                            placeholder="Contoh: Refund via Transfer BCA"
+                            className="w-full px-3 py-1.5 text-sm border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white"
+                          />
+                        </div>
+                        <p className="text-[11px] text-red-700 leading-tight">
+                          ✨ <em>Otomatis dicatat di Neraca (Debit: Pembatalan penjualan, Kredit: Kas) dan Arus Kas keluar kategori Operasi Penjualan.</em>
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-gray-600">
+                        *Jika dana tidak dikembalikan, tidak ada jurnal pengembalian kas baru yang dicatat.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Catatan
@@ -683,6 +765,9 @@ const AdminOrderDetail = () => {
                       setNotes('');
                       setProofFile(null);
                       setProofPreview(null);
+                      setIsRefund(false);
+                      setRefundAmount('');
+                      setRefundNotes('');
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >

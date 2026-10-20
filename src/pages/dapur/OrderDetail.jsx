@@ -4,6 +4,7 @@ import { orderAPI } from '../../utils/api';
 import { parseDeliveryNotes, formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
+import OrderCostManagement from '../../components/OrderCostManagement';
 
 const DapurOrderDetail = () => {
   const { id } = useParams();
@@ -340,6 +341,9 @@ const DapurOrderDetail = () => {
                 </div>
               </div>
             )}
+
+            {/* MODAL & HPP PESANAN (Halaman 8 & 9 PDF) */}
+            <OrderCostManagement orderId={id} onUpdated={fetchOrder} />
           </div>
 
           {/* Action Panel */}

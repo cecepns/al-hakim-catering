@@ -4,6 +4,31 @@ import { formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 
+const DEBIT_ACCOUNTS = [
+  'Kas',
+  'Bank',
+  'Piutang Usaha',
+  'Persediaan',
+  'Perlengkapan',
+  'Aset Tetap',
+  'HPP',
+  'Beban Operasional',
+  'Beban Bunga',
+  'Pembatalan penjualan'
+];
+
+const CREDIT_ACCOUNTS = [
+  'Utang Usaha',
+  'Utang Bank',
+  'Utang/Beban Masih Harus Dibayar',
+  'Modal Pemilik',
+  'Laba Ditahan',
+  'Prive',
+  'Pendapatan Penjualan',
+  'Pendapatan Jasa',
+  'Pendapatan Lainnya'
+];
+
 const CashFlow = () => {
   const [summary, setSummary] = useState({
     balance: 0,
@@ -16,6 +41,7 @@ const CashFlow = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [activityFilter, setActivityFilter] = useState('all');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -28,6 +54,9 @@ const CashFlow = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [formData, setFormData] = useState({
     activity_category: 'operasi',
+    sub_category: '',
+    debit_account: '',
+    credit_account: '',
     type: 'income',
     amount: '',
     description: '',
@@ -52,6 +81,9 @@ const CashFlow = () => {
       if (activityFilter !== 'all') {
         params.activity_category = activityFilter;
       }
+      if (subCategoryFilter !== 'all') {
+        params.sub_category = subCategoryFilter;
+      }
 
       const [summaryRes, transactionsRes] = await Promise.all([
         cashFlowAPI.getSummary(params),
@@ -72,13 +104,22 @@ const CashFlow = () => {
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, activityFilter, startDate, endDate, currentPage]);
+  }, [filter, activityFilter, subCategoryFilter, startDate, endDate, currentPage]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       const formDataToSend = new FormData();
       formDataToSend.append('activity_category', formData.activity_category);
+      if (formData.activity_category === 'operasi' && formData.sub_category) {
+        formDataToSend.append('sub_category', formData.sub_category);
+      }
+      if (formData.debit_account) {
+        formDataToSend.append('debit_account', formData.debit_account);
+      }
+      if (formData.credit_account) {
+        formDataToSend.append('credit_account', formData.credit_account);
+      }
       formDataToSend.append('type', formData.type);
       formDataToSend.append('amount', formData.amount);
       formDataToSend.append('description', formData.description);
@@ -120,6 +161,9 @@ const CashFlow = () => {
     setEditingTransaction(transaction);
     setFormData({
       activity_category: transaction.activity_category || 'operasi',
+      sub_category: transaction.sub_category || '',
+      debit_account: transaction.debit_account || '',
+      credit_account: transaction.credit_account || '',
       type: transaction.type,
       amount: transaction.amount,
       description: transaction.description || '',
@@ -154,6 +198,9 @@ const CashFlow = () => {
       if (activityFilter !== 'all') {
         params.activity_category = activityFilter;
       }
+      if (subCategoryFilter !== 'all') {
+        params.sub_category = subCategoryFilter;
+      }
 
       const response = await cashFlowAPI.exportExcel(params);
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -172,6 +219,9 @@ const CashFlow = () => {
   const resetForm = () => {
     setFormData({
       activity_category: 'operasi',
+      sub_category: '',
+      debit_account: '',
+      credit_account: '',
       type: 'income',
       amount: '',
       description: '',
@@ -345,6 +395,22 @@ const CashFlow = () => {
                 </select>
               </div>
               <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700">Sub-Kategori:</label>
+                <select
+                  value={subCategoryFilter}
+                  onChange={(e) => {
+                    setSubCategoryFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-sm"
+                >
+                  <option value="all">Semua Sub-Kategori</option>
+                  <option value="Penjualan">Penjualan</option>
+                  <option value="Pembelian persediaan">Pembelian persediaan</option>
+                  <option value="Biaya operasional">Biaya operasional</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-gray-700">Dari:</label>
                 <input
                   type="date"
@@ -419,18 +485,41 @@ const CashFlow = () => {
                     {transactions.map((transaction) => (
                       <tr key={transaction.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                          {new Date(transaction.created_at).toLocaleDateString('id-ID', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              {new Date(transaction.created_at).toLocaleDateString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                            {Boolean(transaction.is_edited) && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800" title="Transaksi ini pernah diedit">
+                                ✏️ Diedit
+                              </span>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {activityCategoryMap[transaction.activity_category] || transaction.activity_category}
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          <div className="font-medium">
+                            {activityCategoryMap[transaction.activity_category] || transaction.activity_category}
+                          </div>
+                          {transaction.sub_category && (
+                            <div className="mt-0.5">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                {transaction.sub_category}
+                              </span>
+                            </div>
+                          )}
+                          {(transaction.debit_account || transaction.credit_account) && (
+                            <div className="text-xs text-gray-500 mt-1 font-mono">
+                              <span className="text-gray-700 font-medium">D:</span> {transaction.debit_account || '-'} | <span className="text-gray-700 font-medium">K:</span> {transaction.credit_account || '-'}
+                            </div>
+                          )}
                           {transaction.order_id_ref && (
-                            <span className="ml-2 text-xs text-gray-500 block">(Pesanan #{transaction.order_id_ref})</span>
+                            <span className="ml-0 text-xs text-gray-500 block mt-0.5">(Pesanan #{transaction.order_id_ref})</span>
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -532,7 +621,7 @@ const CashFlow = () => {
         {/* Add/Edit Transaction Modal */}
         {modalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 {editingTransaction ? 'Edit Transaksi' : 'Tambah Transaksi'}
               </h3>
@@ -550,6 +639,58 @@ const CashFlow = () => {
                     <option value="pendanaan">Aktivitas Pendanaan</option>
                   </select>
                 </div>
+
+                {formData.activity_category === 'operasi' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Sub-Kategori Operasi
+                    </label>
+                    <select
+                      value={formData.sub_category}
+                      onChange={(e) => setFormData({ ...formData, sub_category: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="">Pilih Sub-Kategori</option>
+                      <option value="Penjualan">Penjualan</option>
+                      <option value="Pembelian persediaan">Pembelian persediaan</option>
+                      <option value="Biaya operasional">Biaya operasional</option>
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Akun Debit (Neraca)
+                    </label>
+                    <select
+                      value={formData.debit_account}
+                      onChange={(e) => setFormData({ ...formData, debit_account: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-sm"
+                    >
+                      <option value="">Pilih Akun Debit (Opsional)</option>
+                      {DEBIT_ACCOUNTS.map((acc) => (
+                        <option key={acc} value={acc}>{acc}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Akun Kredit (Neraca)
+                    </label>
+                    <select
+                      value={formData.credit_account}
+                      onChange={(e) => setFormData({ ...formData, credit_account: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-sm"
+                    >
+                      <option value="">Pilih Akun Kredit (Opsional)</option>
+                      {CREDIT_ACCOUNTS.map((acc) => (
+                        <option key={acc} value={acc}>{acc}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Tipe</label>
                   <select
@@ -691,6 +832,27 @@ const CashFlow = () => {
                             <span className="text-gray-600">Kategori:</span>{' '}
                             <span className="line-through">{activityCategoryMap[history.old_activity_category] || history.old_activity_category}</span> →{' '}
                             <span className="font-medium">{activityCategoryMap[history.new_activity_category] || history.new_activity_category}</span>
+                          </p>
+                        )}
+                        {history.old_sub_category !== history.new_sub_category && (
+                          <p>
+                            <span className="text-gray-600">Sub-Kategori:</span>{' '}
+                            <span className="line-through">{history.old_sub_category || '-'}</span> →{' '}
+                            <span className="font-medium">{history.new_sub_category || '-'}</span>
+                          </p>
+                        )}
+                        {history.old_debit_account !== history.new_debit_account && (
+                          <p>
+                            <span className="text-gray-600">Akun Debit:</span>{' '}
+                            <span className="line-through">{history.old_debit_account || '-'}</span> →{' '}
+                            <span className="font-medium">{history.new_debit_account || '-'}</span>
+                          </p>
+                        )}
+                        {history.old_credit_account !== history.new_credit_account && (
+                          <p>
+                            <span className="text-gray-600">Akun Kredit:</span>{' '}
+                            <span className="line-through">{history.old_credit_account || '-'}</span> →{' '}
+                            <span className="font-medium">{history.new_credit_account || '-'}</span>
                           </p>
                         )}
                         {history.old_description !== history.new_description && (
