@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderAPI } from '../../utils/api';
+import { orderAPI, orderCostsAPI, inventoryAPI } from '../../utils/api';
 import { parseDeliveryNotes, formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 import OrderCostManagement from '../../components/OrderCostManagement';
+import OrderProcessCostSection from '../../components/OrderProcessCostSection';
 
 const DapurOrderDetail = () => {
   const { id } = useParams();
@@ -20,6 +21,69 @@ const DapurOrderDetail = () => {
   const [savingChecklist, setSavingChecklist] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
+
+  // States for MODAL & HPP on update status diproses (Revisi Gambar 1)
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [loadingInventory, setLoadingInventory] = useState(false);
+  const [modalRows, setModalRows] = useState([]);
+  const [materialsState, setMaterialsState] = useState({});
+
+  const fetchInventory = useCallback(async () => {
+    try {
+      setLoadingInventory(true);
+      const res = await inventoryAPI.getItems();
+      setInventoryItems(res.data || []);
+    } catch (err) {
+      console.error('Error fetching inventory for kitchen:', err);
+    } finally {
+      setLoadingInventory(false);
+    }
+  }, []);
+
+  const handleAddModalRow = () => {
+    setModalRows((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        amount: '',
+        description: '',
+        proofFile: null,
+        proofPreview: null
+      }
+    ]);
+  };
+
+  const handleRemoveModalRow = (rowId) => {
+    setModalRows((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
+  const handleUpdateModalRow = (rowId, field, value) => {
+    setModalRows((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const handleToggleMaterial = (itemId, checked) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        checked,
+        quantity: checked ? (prev[itemId]?.quantity || '') : ''
+      }
+    }));
+  };
+
+  const handleQuantityChange = (itemId, quantity) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        quantity,
+        checked: parseFloat(quantity) > 0 ? true : (prev[itemId]?.checked || false)
+      }
+    }));
+  };
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -55,7 +119,8 @@ const DapurOrderDetail = () => {
   useEffect(() => {
     fetchOrder();
     fetchChecklist();
-  }, [fetchOrder, fetchChecklist]);
+    fetchInventory();
+  }, [fetchOrder, fetchChecklist, fetchInventory]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -117,10 +182,38 @@ const DapurOrderDetail = () => {
       formData.append('proof', proofFile);
 
       await orderAPI.updateStatus(id, formData);
+
+      // Integrasi MODAL & HPP saat status diproses dapur (Revisi Gambar 1)
+      // 1. Simpan modal jika ada yang diisi
+      const validModalRows = modalRows.filter((r) => parseFloat(r.amount) > 0);
+      for (const row of validModalRows) {
+        const costFormData = new FormData();
+        costFormData.append('amount', row.amount);
+        costFormData.append('description', row.description || `Modal pesanan #${id}`);
+        if (row.proofFile) {
+          costFormData.append('receipt', row.proofFile);
+        }
+        await orderCostsAPI.addCost(id, costFormData);
+      }
+
+      // 2. Simpan bahan baku jika ada yang dicentang
+      const selectedMaterials = Object.entries(materialsState)
+        .filter(([_, val]) => val?.checked && parseFloat(val?.quantity) > 0)
+        .map(([itemId, val]) => ({
+          inventory_item_id: itemId,
+          quantity: parseFloat(val.quantity)
+        }));
+
+      if (selectedMaterials.length > 0) {
+        await orderCostsAPI.addMaterial(id, { materials: selectedMaterials });
+      }
+
       alert('Status pesanan berhasil diupdate menjadi Diproses');
       setNotes('');
       setProofFile(null);
       setProofPreview('');
+      setModalRows([]);
+      setMaterialsState({});
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -386,6 +479,19 @@ const DapurOrderDetail = () => {
                       </div>
                     )}
                   </div>
+
+                  {/* MODAL & HPP saat mulai diproses (Revisi Gambar 1) */}
+                  <OrderProcessCostSection
+                    modalRows={modalRows}
+                    onAddModalRow={handleAddModalRow}
+                    onRemoveModalRow={handleRemoveModalRow}
+                    onUpdateModalRow={handleUpdateModalRow}
+                    materialsState={materialsState}
+                    onToggleMaterial={handleToggleMaterial}
+                    onQuantityChange={handleQuantityChange}
+                    inventoryItems={inventoryItems}
+                    loading={loadingInventory}
+                  />
 
                   <button
                     onClick={handleStartProcessing}

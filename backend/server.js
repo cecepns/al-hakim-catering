@@ -5476,9 +5476,28 @@ app.post('/api/purchases', authenticateToken, authorizeRole('admin'), upload.sin
       }
     }
 
-    // Update item's last_price in master inventory
+    // Update item's last_price in master inventory using Weighted Average Method
+    // (Metode Rata-Rata Tertimbang setiap ada pembelian baru)
     if (itemId && unitPrice > 0) {
-      await connection.query('UPDATE inventory_items SET last_price = ? WHERE id = ?', [unitPrice, itemId]);
+      const [currItem] = await connection.query(
+        'SELECT stock, last_price FROM inventory_items WHERE id = ? FOR UPDATE',
+        [itemId]
+      );
+      if (currItem.length > 0) {
+        const stokLama = parseFloat(currItem[0].stock || 0);
+        const hargaLama = parseFloat(currItem[0].last_price || 0);
+        const qtyBeli = parsedQty;
+        const hargaBeli = unitPrice;
+
+        let newAvgPrice = hargaBeli;
+        if (stokLama > 0 && hargaLama > 0) {
+          // Rumus Rata-rata Tertimbang: ((stok_lama * harga_lama) + (qty_beli * harga_beli)) / (stok_lama + qty_beli)
+          newAvgPrice = ((stokLama * hargaLama) + (qtyBeli * hargaBeli)) / (stokLama + qtyBeli);
+        }
+        newAvgPrice = Math.round(newAvgPrice * 100) / 100;
+
+        await connection.query('UPDATE inventory_items SET last_price = ? WHERE id = ?', [newAvgPrice, itemId]);
+      }
     }
 
     // Insert purchase
@@ -6293,77 +6312,99 @@ app.get('/api/orders/:id/materials', authenticateToken, async (req, res) => {
   }
 });
 
-// 5. Add material used (Bahan Baku Persediaan) for an order
+// 5. Add material used (Bahan Baku Persediaan) for an order (mendukung single atau multiple/batch)
 app.post('/api/orders/:id/materials', authenticateToken, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
     const orderId = req.params.id;
-    const { inventory_item_id, quantity } = req.body;
 
-    if (!inventory_item_id || !quantity || parseFloat(quantity) <= 0) {
+    // Support batch (materials array) or single item
+    let itemsToProcess = [];
+    if (Array.isArray(req.body.materials) && req.body.materials.length > 0) {
+      itemsToProcess = req.body.materials;
+    } else if (req.body.inventory_item_id && req.body.quantity) {
+      itemsToProcess = [{
+        inventory_item_id: req.body.inventory_item_id,
+        quantity: req.body.quantity
+      }];
+    }
+
+    if (itemsToProcess.length === 0) {
+      await connection.rollback();
       return res.status(400).json({ message: 'Barang persediaan dan jumlah valid wajib dipilih' });
     }
 
-    const qty = parseFloat(quantity);
+    const insertedIds = [];
 
-    // Check item in inventory
-    const [items] = await connection.query(
-      'SELECT id, name, category, unit, stock, last_price FROM inventory_items WHERE id = ? FOR UPDATE',
-      [inventory_item_id]
-    );
+    for (const mat of itemsToProcess) {
+      const itemId = parseInt(mat.inventory_item_id);
+      const qty = parseFloat(mat.quantity);
 
-    if (items.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
-    }
+      if (!itemId || !qty || qty <= 0) continue;
 
-    const item = items[0];
-    const stockInitial = parseFloat(item.stock);
-    const stockFinal = stockInitial - qty;
-    const unitPrice = parseFloat(item.last_price || 0);
-    const subtotal = qty * unitPrice;
-
-    // 1. Kurangi stok persediaan
-    await connection.query(
-      'UPDATE inventory_items SET stock = ? WHERE id = ?',
-      [stockFinal, inventory_item_id]
-    );
-
-    // 2. Tracking Stok Persediaan (inventory_stock_logs)
-    await connection.query(
-      `INSERT INTO inventory_stock_logs 
-         (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
-         VALUES (?, CURRENT_DATE, ?, 0, ?, ?, ?, 'order', ?, ?)`,
-      [inventory_item_id, stockInitial, qty, stockFinal, `Bahan baku pesanan #${orderId}`, orderId, req.user.id]
-    );
-
-    // 3. Neraca: Debit: HPP, Kredit: Persediaan (jika subtotal > 0)
-    let journalId = null;
-    if (subtotal > 0) {
-      const [jRes] = await connection.query(
-        `INSERT INTO accounting_journal_entries 
-           (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
-           VALUES (CURRENT_DATE, 'order', ?, ?, 'HPP', 'Persediaan', ?, ?)`,
-        [orderId, `Pemakaian bahan baku pesanan #${orderId}: ${item.name} (${qty} ${item.unit})`, subtotal, req.user.id]
+      // Check item in inventory
+      const [items] = await connection.query(
+        'SELECT id, name, category, unit, stock, last_price FROM inventory_items WHERE id = ? FOR UPDATE',
+        [itemId]
       );
-      journalId = jRes.insertId;
+
+      if (items.length === 0) continue;
+
+      const item = items[0];
+      const stockInitial = parseFloat(item.stock);
+      const stockFinal = stockInitial - qty;
+      const unitPrice = parseFloat(item.last_price || 0);
+      const subtotal = qty * unitPrice;
+
+      // 1. Kurangi stok persediaan
+      await connection.query(
+        'UPDATE inventory_items SET stock = ? WHERE id = ?',
+        [stockFinal, itemId]
+      );
+
+      // 2. Tracking Stok Persediaan (inventory_stock_logs)
+      await connection.query(
+        `INSERT INTO inventory_stock_logs 
+           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+           VALUES (?, CURRENT_DATE, ?, 0, ?, ?, ?, 'order', ?, ?)`,
+        [itemId, stockInitial, qty, stockFinal, `Bahan baku pesanan #${orderId}`, orderId, req.user.id]
+      );
+
+      // 3. Neraca: Debit: HPP, Kredit: Persediaan (jika subtotal > 0)
+      let journalId = null;
+      if (subtotal > 0) {
+        const [jRes] = await connection.query(
+          `INSERT INTO accounting_journal_entries 
+             (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+             VALUES (CURRENT_DATE, 'order', ?, ?, 'HPP', 'Persediaan', ?, ?)`,
+          [orderId, `Pemakaian bahan baku pesanan #${orderId}: ${item.name} (${qty} ${item.unit})`, subtotal, req.user.id]
+        );
+        journalId = jRes.insertId;
+      }
+
+      // 4. Simpan ke order_materials
+      const [matRes] = await connection.query(
+        `INSERT INTO order_materials 
+           (order_id, inventory_item_id, item_name, category, quantity, unit, unit_price, subtotal, journal_id, created_by) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, itemId, item.name, item.category, qty, item.unit, unitPrice, subtotal, journalId, req.user.id]
+      );
+      insertedIds.push(matRes.insertId);
     }
 
-    // 4. Simpan ke order_materials
-    const [matRes] = await connection.query(
-      `INSERT INTO order_materials 
-         (order_id, inventory_item_id, item_name, category, quantity, unit, unit_price, subtotal, journal_id, created_by) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, inventory_item_id, item.name, item.category, qty, item.unit, unitPrice, subtotal, journalId, req.user.id]
-    );
+    if (insertedIds.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Tidak ada bahan baku yang berhasil dicatat. Pastikan jumlah lebih dari 0' });
+    }
 
     await connection.commit();
 
     res.status(201).json({
-      message: 'Bahan baku berhasil dicatat dan stok berhasil dikurangi',
-      materialId: matRes.insertId
+      message: `${insertedIds.length} bahan baku berhasil dicatat dan stok berhasil dikurangi`,
+      insertedCount: insertedIds.length,
+      materialIds: insertedIds
     });
   } catch (error) {
     await connection.rollback();

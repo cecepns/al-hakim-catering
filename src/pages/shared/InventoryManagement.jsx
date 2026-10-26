@@ -37,6 +37,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
     unit: 'Pcs',
     stock: '',
     min_stock: '10',
+    last_price: '',
     notes: ''
   });
   const [submittingItem, setSubmittingItem] = useState(false);
@@ -143,7 +144,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
       }
       setItemModalOpen(false);
       setEditingItem(null);
-      setItemForm({ category: '', name: '', unit: 'Pcs', stock: '', min_stock: '10', notes: '' });
+      setItemForm({ category: '', name: '', unit: 'Pcs', stock: '', min_stock: '10', last_price: '', notes: '' });
       fetchItems();
       fetchCategories();
     } catch (error) {
@@ -239,7 +240,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
               <button
                 onClick={() => {
                   setEditingItem(null);
-                  setItemForm({ category: '', name: '', unit: 'Pcs', stock: '0', min_stock: '10', notes: '' });
+                  setItemForm({ category: '', name: '', unit: 'Pcs', stock: '0', min_stock: '10', last_price: '', notes: '' });
                   setItemModalOpen(true);
                 }}
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 shadow-sm transition"
@@ -346,13 +347,17 @@ const InventoryManagement = ({ role = 'admin' }) => {
                 </button>
               </div>
 
-              <div className="text-xs text-gray-500">
-                Total: <strong>{items.length}</strong> barang
+              <div className="text-xs text-gray-500 flex items-center space-x-2">
+                <span>Total: <strong>{items.length}</strong> barang</span>
+                <span>•</span>
+                <span className="text-primary-700 font-bold">
+                  Total Nilai Stok: Rp {formatRupiah(items.reduce((acc, it) => acc + ((parseFloat(it.stock) || 0) * (parseFloat(it.last_price) || 0)), 0))}
+                </span>
               </div>
             </div>
 
-            {/* Table Stok Persediaan (Sesuai PDF Page 6) */}
-            {/* No | Kategori | Nama barang | Stok | Stok Minimum | Keterangan | Ajukan pembelian */}
+            {/* Table Stok Persediaan (Sesuai Revisi Client & PDF) */}
+            {/* No | Kategori | Nama barang | Stok Saat Ini | Harga Satuan | Nilai Stok Akhir | Stok Minimum | Status | Keterangan | Aksi */}
             <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -362,6 +367,8 @@ const InventoryManagement = ({ role = 'admin' }) => {
                       <th className="px-4 py-3">Kategori</th>
                       <th className="px-4 py-3">Nama Barang</th>
                       <th className="px-4 py-3 text-center">Stok Saat Ini</th>
+                      <th className="px-4 py-3 text-right">Harga Satuan (Rp)</th>
+                      <th className="px-4 py-3 text-right">Nilai Stok Akhir (Rp)</th>
                       <th className="px-4 py-3 text-center">Stok Minimum</th>
                       <th className="px-4 py-3 text-center">Status</th>
                       <th className="px-4 py-3">Keterangan</th>
@@ -371,19 +378,23 @@ const InventoryManagement = ({ role = 'admin' }) => {
                   <tbody className="divide-y divide-gray-200">
                     {loadingItems ? (
                       <tr>
-                        <td colSpan="8" className="text-center py-8 text-gray-500">
+                        <td colSpan="10" className="text-center py-8 text-gray-500">
                           Memuat data persediaan...
                         </td>
                       </tr>
                     ) : items.length === 0 ? (
                       <tr>
-                        <td colSpan="8" className="text-center py-8 text-gray-400">
+                        <td colSpan="10" className="text-center py-8 text-gray-400">
                           Tidak ada data barang persediaan.
                         </td>
                       </tr>
                     ) : (
                       items.map((item, idx) => {
                         const isLow = parseFloat(item.stock) <= parseFloat(item.min_stock);
+                        const stockNum = parseFloat(item.stock) || 0;
+                        const priceNum = parseFloat(item.last_price) || 0;
+                        const finalValue = stockNum * priceNum;
+
                         return (
                           <tr key={item.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
                             <td className="px-4 py-3 text-gray-500 font-mono text-xs">{idx + 1}</td>
@@ -396,7 +407,13 @@ const InventoryManagement = ({ role = 'admin' }) => {
                               {item.name}
                             </td>
                             <td className="px-4 py-3 text-center font-bold text-base text-gray-900">
-                              {parseFloat(item.stock)} <span className="text-xs font-normal text-gray-500">{item.unit}</span>
+                              {stockNum} <span className="text-xs font-normal text-gray-500">{item.unit}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-xs font-semibold text-gray-800">
+                              Rp {formatRupiah(priceNum)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-xs font-bold text-gray-900">
+                              Rp {formatRupiah(finalValue)}
                             </td>
                             <td className="px-4 py-3 text-center text-gray-600 text-xs">
                               {parseFloat(item.min_stock)} {item.unit}
@@ -435,6 +452,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
                                       unit: item.unit,
                                       stock: item.stock,
                                       min_stock: item.min_stock,
+                                      last_price: item.last_price || '',
                                       notes: item.notes || ''
                                     });
                                     setItemModalOpen(true);
@@ -461,6 +479,19 @@ const InventoryManagement = ({ role = 'admin' }) => {
                       })
                     )}
                   </tbody>
+                  {items.length > 0 && (
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900 text-xs">
+                      <tr>
+                        <td colSpan="5" className="px-4 py-3 text-right uppercase text-gray-600">
+                          Total Nilai Stok Persediaan:
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-extrabold text-primary-700">
+                          Rp {formatRupiah(items.reduce((acc, it) => acc + ((parseFloat(it.stock) || 0) * (parseFloat(it.last_price) || 0)), 0))}
+                        </td>
+                        <td colSpan="4"></td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
@@ -785,6 +816,24 @@ const InventoryManagement = ({ role = 'admin' }) => {
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Harga Satuan (Rp)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="Contoh: 15000"
+                  value={itemForm.last_price}
+                  onChange={(e) => setItemForm({ ...itemForm, last_price: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  *Harga satuan otomatis diperbarui dengan metode rata-rata tertimbang setiap ada pembelian baru.
+                </p>
               </div>
 
               <div>

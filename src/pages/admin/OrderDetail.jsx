@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderAPI } from '../../utils/api';
+import { orderAPI, orderCostsAPI, inventoryAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes, formatDate } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 import InvoiceModal from '../../components/InvoiceModal';
 import OrderCostManagement from '../../components/OrderCostManagement';
+import OrderProcessCostSection from '../../components/OrderProcessCostSection';
 
 const AdminOrderDetail = () => {
   const { id } = useParams();
@@ -30,6 +31,69 @@ const AdminOrderDetail = () => {
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
+
+  // States for MODAL & HPP on update status diproses (Revisi Gambar 1)
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [loadingInventory, setLoadingInventory] = useState(false);
+  const [modalRows, setModalRows] = useState([]);
+  const [materialsState, setMaterialsState] = useState({});
+
+  const fetchInventory = async () => {
+    try {
+      setLoadingInventory(true);
+      const res = await inventoryAPI.getItems();
+      setInventoryItems(res.data || []);
+    } catch (err) {
+      console.error('Error fetching inventory items:', err);
+    } finally {
+      setLoadingInventory(false);
+    }
+  };
+
+  const handleAddModalRow = () => {
+    setModalRows((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        amount: '',
+        description: '',
+        proofFile: null,
+        proofPreview: null
+      }
+    ]);
+  };
+
+  const handleRemoveModalRow = (rowId) => {
+    setModalRows((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
+  const handleUpdateModalRow = (rowId, field, value) => {
+    setModalRows((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const handleToggleMaterial = (itemId, checked) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        checked,
+        quantity: checked ? (prev[itemId]?.quantity || '') : ''
+      }
+    }));
+  };
+
+  const handleQuantityChange = (itemId, quantity) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        quantity,
+        checked: parseFloat(quantity) > 0 ? true : (prev[itemId]?.checked || false)
+      }
+    }));
+  };
 
   useEffect(() => {
     fetchOrder();
@@ -117,6 +181,34 @@ const AdminOrderDetail = () => {
       }
 
       await orderAPI.updateStatus(id, formData);
+
+      // Integrasi MODAL & HPP saat status diproses (Revisi Gambar 1)
+      if (newStatus === 'diproses') {
+        // 1. Simpan baris modal jika ada yang diisi
+        const validModalRows = modalRows.filter((r) => parseFloat(r.amount) > 0);
+        for (const row of validModalRows) {
+          const costFormData = new FormData();
+          costFormData.append('amount', row.amount);
+          costFormData.append('description', row.description || `Modal pesanan #${id}`);
+          if (row.proofFile) {
+            costFormData.append('receipt', row.proofFile);
+          }
+          await orderCostsAPI.addCost(id, costFormData);
+        }
+
+        // 2. Simpan bahan baku persediaan jika ada yang dicentang
+        const selectedMaterials = Object.entries(materialsState)
+          .filter(([_, val]) => val?.checked && parseFloat(val?.quantity) > 0)
+          .map(([itemId, val]) => ({
+            inventory_item_id: itemId,
+            quantity: parseFloat(val.quantity)
+          }));
+
+        if (selectedMaterials.length > 0) {
+          await orderCostsAPI.addMaterial(id, { materials: selectedMaterials });
+        }
+      }
+
       alert('Status pesanan berhasil diupdate');
       setStatusModal(false);
       setNewStatus('');
@@ -126,6 +218,8 @@ const AdminOrderDetail = () => {
       setIsRefund(false);
       setRefundAmount('');
       setRefundNotes('');
+      setModalRows([]);
+      setMaterialsState({});
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -628,7 +722,9 @@ const AdminOrderDetail = () => {
         {/* Status Update Modal */}
         {statusModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className={`bg-white rounded-xl shadow-xl w-full p-6 max-h-[90vh] overflow-y-auto transition-all ${
+              newStatus === 'diproses' ? 'max-w-3xl' : 'max-w-md'
+            }`}>
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Status Pesanan</h3>
               <div className="space-y-4">
                 <div>
@@ -647,8 +743,11 @@ const AdminOrderDetail = () => {
                           : (parseFloat(order?.final_amount || 0));
                         setRefundAmount(defaultRefund || '');
                       }
+                      if (val === 'diproses' && inventoryItems.length === 0) {
+                        fetchInventory();
+                      }
                     }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 font-semibold"
                   >
                     <option value="">Pilih Status</option>
                     <option value="dibuat">Dibuat</option>
@@ -658,6 +757,21 @@ const AdminOrderDetail = () => {
                     <option value="dibatalkan">Dibatalkan</option>
                   </select>
                 </div>
+
+                {/* MODAL & HPP saat Status Diproses (Revisi Gambar 1) */}
+                {newStatus === 'diproses' && (
+                  <OrderProcessCostSection
+                    modalRows={modalRows}
+                    onAddModalRow={handleAddModalRow}
+                    onRemoveModalRow={handleRemoveModalRow}
+                    onUpdateModalRow={handleUpdateModalRow}
+                    materialsState={materialsState}
+                    onToggleMaterial={handleToggleMaterial}
+                    onQuantityChange={handleQuantityChange}
+                    inventoryItems={inventoryItems}
+                    loading={loadingInventory}
+                  />
+                )}
 
                 {/* Seksi Khusus Pembatalan & Refund (Halaman 9 & 10 PDF) */}
                 {newStatus === 'dibatalkan' && (
@@ -768,6 +882,8 @@ const AdminOrderDetail = () => {
                       setIsRefund(false);
                       setRefundAmount('');
                       setRefundNotes('');
+                      setModalRows([]);
+                      setMaterialsState({});
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >

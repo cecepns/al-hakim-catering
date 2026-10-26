@@ -17,11 +17,33 @@ const OrderCostManagement = ({ orderId, readOnly = false, onUpdated }) => {
   const [costProofPreview, setCostProofPreview] = useState(null);
   const [submittingCost, setSubmittingCost] = useState(false);
 
-  // Form states for Material Used (Bahan Baku)
-  const [selectedItemId, setSelectedItemId] = useState('');
-  const [materialQty, setMaterialQty] = useState('');
-  const [isConfirmed, setIsConfirmed] = useState(false);
+  // Form states for Material Used (Bahan Baku) - Revisi Multi-Centang & Kategori
+  const [materialsState, setMaterialsState] = useState({});
   const [submittingMaterial, setSubmittingMaterial] = useState(false);
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState('');
+
+  const handleToggleMaterial = (itemId, checked) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        checked,
+        quantity: checked ? (prev[itemId]?.quantity || '') : ''
+      }
+    }));
+  };
+
+  const handleQuantityChange = (itemId, quantity) => {
+    setMaterialsState((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        quantity,
+        checked: parseFloat(quantity) > 0 ? true : (prev[itemId]?.checked || false)
+      }
+    }));
+  };
 
   // Image Viewer
   const [viewingImage, setViewingImage] = useState(null);
@@ -114,36 +136,29 @@ const OrderCostManagement = ({ orderId, readOnly = false, onUpdated }) => {
     }
   };
 
-  // Add Material Used
-  const handleAddMaterial = async (e) => {
+  // Add Materials Used in Batch
+  const handleAddMaterialsBatch = async (e) => {
     e.preventDefault();
-    if (!selectedItemId) {
-      alert('Pilih bahan baku terlebih dahulu');
-      return;
-    }
-    if (!materialQty || parseFloat(materialQty) <= 0) {
-      alert('Masukkan jumlah pemakaian yang valid');
-      return;
-    }
-    if (!isConfirmed) {
-      alert('Silakan centang persetujuan pemakaian bahan');
+    const selectedList = Object.entries(materialsState)
+      .filter(([_, val]) => val?.checked && parseFloat(val?.quantity) > 0)
+      .map(([id, val]) => ({
+        inventory_item_id: id,
+        quantity: parseFloat(val.quantity)
+      }));
+
+    if (selectedList.length === 0) {
+      alert('Pilih dan isi jumlah setidaknya satu bahan baku yang ingin dimasukkan');
       return;
     }
 
     try {
       setSubmittingMaterial(true);
-      await orderCostsAPI.addMaterial(orderId, {
-        inventory_item_id: selectedItemId,
-        quantity: parseFloat(materialQty)
-      });
-
-      setSelectedItemId('');
-      setMaterialQty('');
-      setIsConfirmed(false);
+      await orderCostsAPI.addMaterial(orderId, { materials: selectedList });
+      setMaterialsState({});
       await fetchData();
       if (onUpdated) onUpdated();
     } catch (error) {
-      console.error('Error adding material:', error);
+      console.error('Error adding materials:', error);
       alert(error.response?.data?.message || 'Gagal mencatat pemakaian bahan baku');
     } finally {
       setSubmittingMaterial(false);
@@ -166,7 +181,18 @@ const OrderCostManagement = ({ orderId, readOnly = false, onUpdated }) => {
     }
   };
 
-  const selectedItemObj = inventoryItems.find((i) => i.id === parseInt(selectedItemId));
+  // Group inventory items by category for batch selection
+  const categoriesMap = inventoryItems.reduce((acc, item) => {
+    const cat = (item.category || 'Lain-lain').trim();
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(item);
+    return acc;
+  }, {});
+  const categoriesList = Object.keys(categoriesMap).sort();
+
+  const selectedMaterialsCount = Object.values(materialsState).filter(
+    (v) => v?.checked && parseFloat(v?.quantity) > 0
+  ).length;
 
   // Calculations
   const totalDirectCosts = costs.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
@@ -406,81 +432,132 @@ const OrderCostManagement = ({ orderId, readOnly = false, onUpdated }) => {
         {activeTab === 'bahan' && (
           <div className="space-y-6">
             {!readOnly && (
-              <form onSubmit={handleAddMaterial} className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                <h4 className="text-sm font-semibold text-gray-800 mb-3 flex items-center space-x-1.5">
-                  <span>🥬</span>
-                  <span>Ambil Bahan Baku dari Stok Persediaan</span>
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                  <div className="md:col-span-5">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Pilih Bahan Baku <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={selectedItemId}
-                      onChange={(e) => setSelectedItemId(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
-                    >
-                      <option value="">-- Pilih Barang dari Master Persediaan --</option>
-                      {inventoryItems.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          [{item.category}] {item.name} - Stok: {item.stock} {item.unit}
-                        </option>
-                      ))}
-                    </select>
+              <form onSubmit={handleAddMaterialsBatch} className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200 pb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-800 flex items-center space-x-1.5">
+                      <span>🥬</span>
+                      <span>Ambil Bahan Baku dari Stok Persediaan</span>
+                    </h4>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Centang beberapa bahan baku sekaligus dan isi jumlah yang dibutuhkan. Stok otomatis berkurang & tercatat ke Laba Rugi.
+                    </p>
                   </div>
-
-                  <div className="md:col-span-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Jumlah Terpakai {selectedItemObj ? `(${selectedItemObj.unit})` : ''} <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="0.01"
-                      step="any"
-                      placeholder="0.00"
-                      value={materialQty}
-                      onChange={(e) => setMaterialQty(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2 flex items-center pb-2">
-                    <label className="inline-flex items-center space-x-2 text-xs font-medium text-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isConfirmed}
-                        onChange={(e) => setIsConfirmed(e.target.checked)}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4"
-                      />
-                      <span>Pilih ✅</span>
-                    </label>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <button
-                      type="submit"
-                      disabled={submittingMaterial || !selectedItemId || !materialQty || !isConfirmed}
-                      className="w-full py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 disabled:bg-gray-300 shadow-sm transition"
-                    >
-                      {submittingMaterial ? 'Memproses...' : 'Potong Stok'}
-                    </button>
-                  </div>
+                  <button
+                    type="submit"
+                    disabled={submittingMaterial || selectedMaterialsCount === 0}
+                    className="inline-flex items-center space-x-1.5 px-4 py-2 bg-primary-600 text-white rounded-lg text-xs font-semibold hover:bg-primary-700 disabled:bg-gray-300 shadow-sm transition"
+                  >
+                    <span>{submittingMaterial ? 'Memproses...' : `➕ Masukkan ${selectedMaterialsCount > 0 ? `(${selectedMaterialsCount}) ` : ''}Bahan Terpilih`}</span>
+                  </button>
                 </div>
 
-                {selectedItemObj && (
-                  <div className="mt-2 text-xs text-gray-500 flex items-center space-x-3">
-                    <span>Stok tersedia: <strong>{selectedItemObj.stock} {selectedItemObj.unit}</strong></span>
-                    <span>Harga beli terakhir: <strong>Rp {formatRupiah(selectedItemObj.last_price || 0)} / {selectedItemObj.unit}</strong></span>
-                    {materialQty && (
-                      <span className="text-primary-700 font-semibold">
-                        Estimasi HPP: Rp {formatRupiah((parseFloat(materialQty) || 0) * (parseFloat(selectedItemObj.last_price) || 0))}
-                      </span>
-                    )}
-                  </div>
-                )}
+                {/* Filter & Search */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Cari nama bahan baku..."
+                    value={materialSearch}
+                    onChange={(e) => setMaterialSearch(e.target.value)}
+                    className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white flex-1 min-w-[160px]"
+                  />
+                  <select
+                    value={activeCategoryFilter}
+                    onChange={(e) => setActiveCategoryFilter(e.target.value)}
+                    className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
+                  >
+                    <option value="">Semua Kategori ({categoriesList.length})</option>
+                    {categoriesList.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat} ({categoriesMap[cat]?.length || 0})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* List Bahan Baku Dikelompokkan Berdasarkan Kategori */}
+                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                  {categoriesList
+                    .filter((cat) => !activeCategoryFilter || cat === activeCategoryFilter)
+                    .map((catName) => {
+                      const catItems = categoriesMap[catName] || [];
+                      const searchLower = materialSearch.toLowerCase();
+                      const visibleItems = catItems.filter(
+                        (item) =>
+                          !materialSearch ||
+                          item.name.toLowerCase().includes(searchLower) ||
+                          catName.toLowerCase().includes(searchLower)
+                      );
+
+                      if (visibleItems.length === 0) return null;
+
+                      return (
+                        <div
+                          key={catName}
+                          className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm"
+                        >
+                          <div className="bg-gray-100/80 px-3 py-1.5 border-b border-gray-200 flex items-center justify-between">
+                            <span className="font-bold text-xs text-gray-800 flex items-center space-x-1.5">
+                              <span>📁</span>
+                              <span>{catName}</span>
+                              <span className="text-[10px] font-normal text-gray-500">
+                                ({visibleItems.length} item)
+                              </span>
+                            </span>
+                          </div>
+
+                          <div className="divide-y divide-gray-100">
+                            {visibleItems.map((item) => {
+                              const isChecked = !!materialsState[item.id]?.checked;
+                              const qtyVal = materialsState[item.id]?.quantity || '';
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`flex items-center justify-between px-3 py-2 transition ${
+                                    isChecked ? 'bg-amber-50/60' : 'hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <div className="flex items-center space-x-2.5 flex-1 min-w-0 pr-2">
+                                    <input
+                                      type="checkbox"
+                                      id={`mgt-mat-${item.id}`}
+                                      checked={isChecked}
+                                      onChange={(e) => handleToggleMaterial(item.id, e.target.checked)}
+                                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4 cursor-pointer"
+                                    />
+                                    <label
+                                      htmlFor={`mgt-mat-${item.id}`}
+                                      className="text-xs font-medium text-gray-800 cursor-pointer truncate"
+                                    >
+                                      {item.name}
+                                    </label>
+                                  </div>
+
+                                  <div className="flex items-center space-x-1.5 w-32 flex-shrink-0">
+                                    <input
+                                      type="number"
+                                      min="0.01"
+                                      step="any"
+                                      placeholder="0"
+                                      value={qtyVal}
+                                      onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                      className={`w-full px-2 py-1 text-xs border rounded-lg focus:ring-2 focus:ring-primary-500 font-semibold text-right ${
+                                        isChecked ? 'border-primary-400 bg-white' : 'border-gray-200 bg-gray-50'
+                                      }`}
+                                    />
+                                    <span className="text-[11px] text-gray-600 font-medium min-w-[28px]">
+                                      {item.unit}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
               </form>
             )}
 
