@@ -42,15 +42,16 @@ const InventoryManagement = ({ role = 'admin' }) => {
   });
   const [submittingItem, setSubmittingItem] = useState(false);
 
-  // Opname Modal
+  // Opname Modal & Batch State
   const [opnameModalOpen, setOpnameModalOpen] = useState(false);
-  const [opnameForm, setOpnameForm] = useState({
-    inventory_item_id: '',
-    date: new Date().toISOString().split('T')[0],
-    physical_stock: '',
-    notes: '',
-    adjust_stock: true
-  });
+  const [allItemsForOpname, setAllItemsForOpname] = useState([]);
+  const [loadingAllItems, setLoadingAllItems] = useState(false);
+  const [opnameDate, setOpnameDate] = useState(new Date().toISOString().split('T')[0]);
+  const [opnameAction, setOpnameAction] = useState(''); // Kolom esai: Tindakan
+  const [opnameAdjustStock, setOpnameAdjustStock] = useState(true);
+  const [opnameItemValues, setOpnameItemValues] = useState({}); // { [itemId]: { physical_stock: '', notes: '', action: '' } }
+  const [opnameFilterCategory, setOpnameFilterCategory] = useState('');
+  const [opnameSearch, setOpnameSearch] = useState('');
   const [submittingOpname, setSubmittingOpname] = useState(false);
 
   // 1. Fetch Categories & Items
@@ -168,32 +169,101 @@ const InventoryManagement = ({ role = 'admin' }) => {
     }
   };
 
-  // Handle Save Opname
+  // Open Opname Modal & Load all items
+  const handleOpenOpnameModal = async () => {
+    try {
+      setLoadingAllItems(true);
+      setOpnameModalOpen(true);
+      const res = await inventoryAPI.getItems();
+      const loadedItems = res.data || [];
+      setAllItemsForOpname(loadedItems);
+
+      const initialValues = {};
+      loadedItems.forEach((it) => {
+        initialValues[it.id] = {
+          physical_stock: '',
+          notes: '',
+          action: ''
+        };
+      });
+      setOpnameItemValues(initialValues);
+      setOpnameDate(new Date().toISOString().split('T')[0]);
+      setOpnameAction('');
+      setOpnameAdjustStock(true);
+      setOpnameSearch('');
+      setOpnameFilterCategory('');
+    } catch (err) {
+      console.error('Error preparing opname:', err);
+      alert('Gagal memuat daftar barang untuk opname');
+    } finally {
+      setLoadingAllItems(false);
+    }
+  };
+
+  const handleFillAllWithSystemStock = () => {
+    const updated = { ...opnameItemValues };
+    allItemsForOpname.forEach((it) => {
+      updated[it.id] = {
+        ...(updated[it.id] || {}),
+        physical_stock: parseFloat(it.stock).toString()
+      };
+    });
+    setOpnameItemValues(updated);
+  };
+
+  const handleClearAllPhysicalStock = () => {
+    const updated = { ...opnameItemValues };
+    allItemsForOpname.forEach((it) => {
+      updated[it.id] = {
+        ...(updated[it.id] || {}),
+        physical_stock: ''
+      };
+    });
+    setOpnameItemValues(updated);
+  };
+
+  const handleItemValueChange = (itemId, field, value) => {
+    setOpnameItemValues((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...(prev[itemId] || { physical_stock: '', notes: '', action: '' }),
+        [field]: value
+      }
+    }));
+  };
+
+  // Handle Save Opname (Semua barang sekaligus)
   const handleSaveOpname = async (e) => {
     e.preventDefault();
-    if (!opnameForm.inventory_item_id || opnameForm.physical_stock === '') {
-      alert('Pilih barang dan masukkan stok fisik');
+
+    const filledEntries = allItemsForOpname.filter((it) => {
+      const val = opnameItemValues[it.id]?.physical_stock;
+      return val !== undefined && val !== null && val.toString().trim() !== '';
+    });
+
+    if (filledEntries.length === 0) {
+      alert('Silakan isi jumlah fisik setidaknya pada satu barang yang di-opname');
       return;
     }
 
     try {
       setSubmittingOpname(true);
-      await inventoryAPI.createOpname({
-        inventory_item_id: opnameForm.inventory_item_id,
-        date: opnameForm.date,
-        physical_stock: parseFloat(opnameForm.physical_stock),
-        notes: opnameForm.notes,
-        adjust_stock: opnameForm.adjust_stock
-      });
-      alert('Stok opname berhasil disimpan dan stok disesuaikan');
+      const payload = {
+        date: opnameDate,
+        action: opnameAction,
+        general_action: opnameAction,
+        sync_stock: opnameAdjustStock,
+        items: filledEntries.map((it) => ({
+          inventory_item_id: it.id,
+          physical_stock: parseFloat(opnameItemValues[it.id]?.physical_stock),
+          notes: opnameItemValues[it.id]?.notes || '',
+          action: opnameItemValues[it.id]?.action || opnameAction || ''
+        }))
+      };
+
+      await inventoryAPI.createOpname(payload);
+      alert(`Stok opname berhasil disimpan untuk ${filledEntries.length} barang`);
       setOpnameModalOpen(false);
-      setOpnameForm({
-        inventory_item_id: '',
-        date: new Date().toISOString().split('T')[0],
-        physical_stock: '',
-        notes: '',
-        adjust_stock: true
-      });
       fetchOpnames();
       fetchItems();
     } catch (error) {
@@ -214,11 +284,6 @@ const InventoryManagement = ({ role = 'admin' }) => {
 
     navigate(`${targetPath}?auto_item_id=${item.id}&category=${encodeURIComponent(item.category)}&item_name=${encodeURIComponent(item.name)}&unit=${encodeURIComponent(item.unit)}`);
   };
-
-  const selectedOpnameItem = items.find((i) => i.id === parseInt(opnameForm.inventory_item_id));
-  const opnameDifference = selectedOpnameItem && opnameForm.physical_stock !== ''
-    ? parseFloat(opnameForm.physical_stock) - parseFloat(selectedOpnameItem.stock)
-    : 0;
 
   return (
     <DashboardLayout role={role}>
@@ -252,7 +317,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
 
             {activeTab === 'opname' && (
               <button
-                onClick={() => setOpnameModalOpen(true)}
+                onClick={handleOpenOpnameModal}
                 className="inline-flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 shadow-sm transition"
               >
                 <span>📝</span>
@@ -640,7 +705,7 @@ const InventoryManagement = ({ role = 'admin' }) => {
 
               <button
                 type="button"
-                onClick={() => setOpnameModalOpen(true)}
+                onClick={handleOpenOpnameModal}
                 className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-semibold hover:bg-primary-700 shadow-sm transition"
               >
                 <span>➕</span>
@@ -648,8 +713,8 @@ const InventoryManagement = ({ role = 'admin' }) => {
               </button>
             </div>
 
-            {/* Table Stok Opname (Sesuai PDF Page 6) */}
-            {/* No | Tanggal | Kategori | Nama barang | Stok sistem | Stok fisik | Selisih | Keterangan */}
+            {/* Table Stok Opname (Sesuai PDF Page 6 + Kolom Tindakan) */}
+            {/* No | Tanggal | Kategori | Nama barang | Stok sistem | Stok fisik | Selisih | Keterangan | Tindakan | Petugas */}
             <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -663,19 +728,20 @@ const InventoryManagement = ({ role = 'admin' }) => {
                       <th className="px-4 py-3 text-center">Stok Fisik</th>
                       <th className="px-4 py-3 text-center">Selisih</th>
                       <th className="px-4 py-3">Keterangan</th>
+                      <th className="px-4 py-3">Tindakan</th>
                       <th className="px-4 py-3">Petugas</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {loadingOpnames ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-gray-500">
+                        <td colSpan="10" className="text-center py-8 text-gray-500">
                           Memuat data stok opname...
                         </td>
                       </tr>
                     ) : opnames.length === 0 ? (
                       <tr>
-                        <td colSpan="9" className="text-center py-8 text-gray-400">
+                        <td colSpan="10" className="text-center py-8 text-gray-400">
                           Belum ada catatan stok opname.
                         </td>
                       </tr>
@@ -713,6 +779,9 @@ const InventoryManagement = ({ role = 'admin' }) => {
                             </td>
                             <td className="px-4 py-3 text-xs text-gray-700">
                               {op.notes || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-800 font-medium">
+                              {op.action || '-'}
                             </td>
                             <td className="px-4 py-3 text-xs text-gray-500">
                               {op.checked_by_name || '-'}
@@ -870,124 +939,256 @@ const InventoryManagement = ({ role = 'admin' }) => {
         </div>
       )}
 
-      {/* Modal Add Stok Opname */}
+      {/* Modal Add Stok Opname Seluruh Barang */}
       {opnameModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Catat Stok Opname Fisik</h3>
-            <form onSubmit={handleSaveOpname} className="space-y-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Pilih Barang Persediaan <span className="text-red-500">*</span>
-                </label>
-                <select
-                  required
-                  value={opnameForm.inventory_item_id}
-                  onChange={(e) => setOpnameForm({ ...opnameForm, inventory_item_id: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
-                >
-                  <option value="">-- Pilih Barang --</option>
-                  {items.map((it) => (
-                    <option key={it.id} value={it.id}>
-                      [{it.category}] {it.name} (Stok Sistem: {parseFloat(it.stock)} {it.unit})
-                    </option>
-                  ))}
-                </select>
+                <h3 className="text-lg font-bold text-gray-900 flex items-center space-x-2">
+                  <span>📋</span>
+                  <span>Catat Stok Opname Fisik (Seluruh Barang)</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Periksa persediaan fisik di gudang/dapur, isi jumlah fisik dan keterangan setiap barang.
+                </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setOpnameModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl font-light leading-none p-1"
+              >
+                &times;
+              </button>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Tanggal Opname
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={opnameForm.date}
-                    onChange={(e) => setOpnameForm({ ...opnameForm, date: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Jumlah Fisik Sebenarnya <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    required
-                    placeholder="0.00"
-                    value={opnameForm.physical_stock}
-                    onChange={(e) => setOpnameForm({ ...opnameForm, physical_stock: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-
-              {selectedOpnameItem && opnameForm.physical_stock !== '' && (
-                <div className={`p-3 rounded-lg border text-xs flex justify-between items-center ${
-                  opnameDifference === 0
-                    ? 'bg-gray-50 border-gray-200 text-gray-700'
-                    : opnameDifference > 0
-                    ? 'bg-green-50 border-green-200 text-green-900'
-                    : 'bg-red-50 border-red-200 text-red-900'
-                }`}>
+            {/* Modal Form */}
+            <form onSubmit={handleSaveOpname} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 overflow-y-auto space-y-4 flex-1">
+                {/* Header Inputs: Tanggal & Sinkronisasi */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-blue-50/60 p-4 rounded-xl border border-blue-200">
                   <div>
-                    <span>Stok Sistem: <strong>{selectedOpnameItem.stock} {selectedOpnameItem.unit}</strong></span>
-                    <span className="block mt-0.5">Stok Fisik: <strong>{opnameForm.physical_stock} {selectedOpnameItem.unit}</strong></span>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Tanggal Opname <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={opnameDate}
+                      onChange={(e) => setOpnameDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white font-medium"
+                    />
                   </div>
-                  <div className="text-right">
-                    <span className="text-[11px] block">Selisih:</span>
-                    <span className="font-extrabold text-sm">
-                      {opnameDifference > 0 ? `+${opnameDifference}` : opnameDifference} {selectedOpnameItem.unit}
-                    </span>
+                  <div className="flex items-center">
+                    <label className="flex items-start space-x-2.5 text-xs text-blue-900 cursor-pointer pt-2">
+                      <input
+                        type="checkbox"
+                        checked={opnameAdjustStock}
+                        onChange={(e) => setOpnameAdjustStock(e.target.checked)}
+                        className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4"
+                      />
+                      <span>
+                        <strong className="block text-blue-950 font-semibold">Otomatis sinkronisasi stok master:</strong>
+                        Sesuaikan stok di sistem menjadi sesuai dengan stok fisik di bawah dan catat otomatis ke kartu stok.
+                      </span>
+                    </label>
                   </div>
                 </div>
-              )}
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Keterangan / Alasan Selisih
-                </label>
-                <textarea
-                  rows="2"
-                  value={opnameForm.notes}
-                  onChange={(e) => setOpnameForm({ ...opnameForm, notes: e.target.value })}
-                  placeholder="Contoh: Barang susut, rusak, atau salah hitung..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                <label className="flex items-start space-x-2 text-xs text-blue-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={opnameForm.adjust_stock}
-                    onChange={(e) => setOpnameForm({ ...opnameForm, adjust_stock: e.target.checked })}
-                    className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4"
+                {/* Kolom Esai: Tindakan */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    Kolom Esai: Tindakan Yang Diambil / Evaluasi Opname <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    rows="2"
+                    required
+                    value={opnameAction}
+                    onChange={(e) => setOpnameAction(e.target.value)}
+                    placeholder="Contoh: Pengecekan rutin fisik barang akhir periode. Penyesuaian stok selisih dilakukan pada master dan pengajuan restok barang habis..."
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
                   />
-                  <span>
-                    <strong>Otomatis sinkronisasi stok master:</strong> Sesuaikan stok di sistem menjadi sesuai dengan stok fisik di atas dan catat ke kartu stok.
-                  </span>
-                </label>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Catatan tindakan ini akan tersimpan ke riwayat opname dan kartu stok.
+                  </p>
+                </div>
+
+                {/* Filter & Quick Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-200">
+                  <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+                    <input
+                      type="text"
+                      placeholder="Cari nama barang..."
+                      value={opnameSearch}
+                      onChange={(e) => setOpnameSearch(e.target.value)}
+                      className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white w-48"
+                    />
+                    <select
+                      value={opnameFilterCategory}
+                      onChange={(e) => setOpnameFilterCategory(e.target.value)}
+                      className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
+                    >
+                      <option value="">Semua Kategori ({categories.length})</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleFillAllWithSystemStock}
+                      className="px-2.5 py-1.5 text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
+                      title="Isi kolom stok fisik seluruh barang dengan nilai stok sistem saat ini"
+                    >
+                      ⚡ Isi Sesuai Stok Sistem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearAllPhysicalStock}
+                      className="px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg transition"
+                    >
+                      Bersihkan Input
+                    </button>
+                  </div>
+                </div>
+
+                {/* Table Daftar Seluruh Barang */}
+                <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="max-h-80 overflow-y-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-gray-100 text-gray-700 uppercase font-semibold sticky top-0 z-10 border-b border-gray-200">
+                        <tr>
+                          <th className="px-3 py-2.5 w-10 text-center">No</th>
+                          <th className="px-3 py-2.5 min-w-[160px]">Kategori & Nama Barang</th>
+                          <th className="px-3 py-2.5 text-center w-24">Stok Sistem</th>
+                          <th className="px-3 py-2.5 text-center w-32">Stok Fisik <span className="text-red-500">*</span></th>
+                          <th className="px-3 py-2.5 text-center w-24">Selisih</th>
+                          <th className="px-3 py-2.5 min-w-[150px]">Keterangan / Alasan Selisih</th>
+                          <th className="px-3 py-2.5 min-w-[130px]">Tindakan Item</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white">
+                        {loadingAllItems ? (
+                          <tr>
+                            <td colSpan="7" className="text-center py-8 text-gray-500">
+                              Memuat seluruh data barang persediaan...
+                            </td>
+                          </tr>
+                        ) : allItemsForOpname.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="text-center py-8 text-gray-400">
+                              Belum ada master barang persediaan.
+                            </td>
+                          </tr>
+                        ) : (
+                          allItemsForOpname
+                            .filter((it) => {
+                              if (opnameFilterCategory && it.category !== opnameFilterCategory) return false;
+                              if (opnameSearch && !it.name.toLowerCase().includes(opnameSearch.toLowerCase())) return false;
+                              return true;
+                            })
+                            .map((it, idx) => {
+                              const sysStock = parseFloat(it.stock);
+                              const itemState = opnameItemValues[it.id] || { physical_stock: '', notes: '', action: '' };
+                              const physVal = itemState.physical_stock;
+                              const hasPhys = physVal !== '' && physVal !== null && !isNaN(parseFloat(physVal));
+                              const diff = hasPhys ? parseFloat(physVal) - sysStock : null;
+
+                              return (
+                                <tr key={it.id} className={hasPhys && diff !== 0 ? 'bg-amber-50/40' : 'hover:bg-gray-50'}>
+                                  <td className="px-3 py-2 text-center text-gray-400 font-mono">{idx + 1}</td>
+                                  <td className="px-3 py-2">
+                                    <span className="text-[10px] text-gray-500 block uppercase font-bold">{it.category}</span>
+                                    <span className="font-semibold text-gray-900 block break-words">{it.name}</span>
+                                  </td>
+                                  <td className="px-3 py-2 text-center font-medium text-gray-700 whitespace-nowrap">
+                                    {sysStock} {it.unit}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <div className="flex items-center space-x-1">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="any"
+                                        placeholder="0.00"
+                                        value={physVal}
+                                        onChange={(e) => handleItemValueChange(it.id, 'physical_stock', e.target.value)}
+                                        className="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-primary-500 text-right font-semibold"
+                                      />
+                                      <span className="text-[10px] text-gray-500 whitespace-nowrap w-6 text-left">{it.unit}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-2 text-center whitespace-nowrap">
+                                    {diff === null ? (
+                                      <span className="text-gray-400">-</span>
+                                    ) : (
+                                      <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                                        diff === 0
+                                          ? 'bg-gray-100 text-gray-600'
+                                          : diff > 0
+                                          ? 'bg-green-100 text-green-800'
+                                          : 'bg-red-100 text-red-800'
+                                      }`}>
+                                        {diff > 0 ? `+${diff}` : diff} {it.unit}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Contoh: Susut / rusak..."
+                                      value={itemState.notes || ''}
+                                      onChange={(e) => handleItemValueChange(it.id, 'notes', e.target.value)}
+                                      className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-primary-500"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Tindakan item..."
+                                      value={itemState.action || ''}
+                                      onChange={(e) => handleItemValueChange(it.id, 'action', e.target.value)}
+                                      className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-primary-500"
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setOpnameModalOpen(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingOpname || !opnameForm.inventory_item_id || opnameForm.physical_stock === ''}
-                  className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 disabled:bg-gray-400"
-                >
-                  {submittingOpname ? 'Menyimpan...' : 'Simpan Opname'}
-                </button>
+              {/* Modal Footer */}
+              <div className="px-6 py-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+                <div className="text-xs text-gray-600">
+                  Total master: <strong>{allItemsForOpname.length}</strong> barang | 
+                  Diisi fisik: <strong className="text-primary-700">{
+                    allItemsForOpname.filter(it => opnameItemValues[it.id]?.physical_stock !== '' && opnameItemValues[it.id]?.physical_stock !== undefined).length
+                  }</strong> barang
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setOpnameModalOpen(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-white"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingOpname}
+                    className="px-5 py-2 bg-primary-600 text-white rounded-lg text-sm font-semibold hover:bg-primary-700 disabled:bg-gray-400 shadow-sm"
+                  >
+                    {submittingOpname ? 'Menyimpan...' : 'Simpan Semua Stok Opname'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

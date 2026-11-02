@@ -52,6 +52,7 @@ const PurchaseRequests = ({ role = 'admin' }) => {
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
   const [receiptForm, setReceiptForm] = useState({
     receipt_status: 'Diterima',
+    received_qty: '',
     receipt_notes: ''
   });
   const [submittingReceipt, setSubmittingReceipt] = useState(false);
@@ -192,10 +193,27 @@ const PurchaseRequests = ({ role = 'admin' }) => {
     e.preventDefault();
     if (!selectedRequest) return;
 
+    if (receiptForm.receipt_status === 'Diterima Sebagian') {
+      const parsedQty = parseFloat(receiptForm.received_qty);
+      if (isNaN(parsedQty) || parsedQty <= 0) {
+        alert('Silakan masukkan jumlah diterima yang valid (harus lebih dari 0)');
+        return;
+      }
+      if (parsedQty > parseFloat(selectedRequest.qty)) {
+        alert(`Jumlah diterima (${parsedQty}) tidak boleh melebihi jumlah pengajuan (${selectedRequest.qty})`);
+        return;
+      }
+    }
+
     try {
       setSubmittingReceipt(true);
+      const qtyToSend = receiptForm.receipt_status === 'Diterima Sebagian'
+        ? parseFloat(receiptForm.received_qty)
+        : (receiptForm.receipt_status === 'Diterima' ? parseFloat(selectedRequest.qty) : 0);
+
       await purchaseRequestAPI.updateReceipt(selectedRequest.id, {
         receipt_status: receiptForm.receipt_status,
+        received_qty: qtyToSend,
         receipt_notes: receiptForm.receipt_notes
       });
       alert('Status penerimaan barang berhasil diperbarui');
@@ -382,7 +400,9 @@ const PurchaseRequests = ({ role = 'admin' }) => {
                               ? 'bg-red-100 text-red-800'
                               : 'bg-gray-100 text-gray-600'
                           }`}>
-                            {req.receipt_status}
+                            {req.receipt_status === 'Diterima Sebagian' && req.received_qty
+                              ? `Diterima Sebagian (${parseFloat(req.received_qty)}/${parseFloat(req.qty)} ${req.unit})`
+                              : req.receipt_status}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -439,6 +459,7 @@ const PurchaseRequests = ({ role = 'admin' }) => {
                                 setSelectedRequest(req);
                                 setReceiptForm({
                                   receipt_status: req.receipt_status === 'Belum Diterima' ? 'Diterima' : req.receipt_status,
+                                  received_qty: req.received_qty !== null && req.received_qty !== undefined ? req.received_qty : req.qty,
                                   receipt_notes: req.receipt_notes || ''
                                 });
                                 setReceiptModalOpen(true);
@@ -785,6 +806,14 @@ const PurchaseRequests = ({ role = 'admin' }) => {
                     <span className="text-gray-600">Status Penerimaan:</span>
                     <span className="font-bold text-emerald-700">{selectedRequest.receipt_status}</span>
                   </div>
+                  {selectedRequest.received_qty !== null && selectedRequest.received_qty !== undefined && (
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-gray-600">Jumlah Diterima:</span>
+                      <span className="font-bold text-emerald-800">
+                        {parseFloat(selectedRequest.received_qty)} / {parseFloat(selectedRequest.qty)} {selectedRequest.unit}
+                      </span>
+                    </div>
+                  )}
                   {selectedRequest.receipt_notes && (
                     <div>
                       <span className="text-gray-600 text-xs block">Catatan Penerimaan:</span>
@@ -882,8 +911,15 @@ const PurchaseRequests = ({ role = 'admin' }) => {
                 </label>
                 <select
                   value={receiptForm.receipt_status}
-                  onChange={(e) => setReceiptForm({ ...receiptForm, receipt_status: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
+                  onChange={(e) => {
+                    const newStatus = e.target.value;
+                    setReceiptForm({
+                      ...receiptForm,
+                      receipt_status: newStatus,
+                      received_qty: newStatus === 'Diterima' ? selectedRequest.qty : (newStatus === 'Diterima Sebagian' ? (receiptForm.received_qty || selectedRequest.qty) : 0)
+                    });
+                  }}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white font-medium"
                 >
                   <option value="Diterima">Diterima (Semua)</option>
                   <option value="Diterima Sebagian">Diterima Sebagian</option>
@@ -891,6 +927,41 @@ const PurchaseRequests = ({ role = 'admin' }) => {
                   <option value="Belum Diterima">Belum Diterima</option>
                 </select>
               </div>
+
+              {/* Input Esai / Kolom Jumlah Diterima (untuk Diterima Sebagian) */}
+              {receiptForm.receipt_status === 'Diterima Sebagian' && (
+                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 space-y-2">
+                  <label className="block text-xs font-semibold text-amber-900">
+                    Jumlah Diterima <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={selectedRequest.qty}
+                      step="any"
+                      required
+                      value={receiptForm.received_qty}
+                      onChange={(e) => setReceiptForm({ ...receiptForm, received_qty: e.target.value })}
+                      placeholder="Masukkan jumlah yang diterima..."
+                      className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 bg-white font-medium"
+                    />
+                    <span className="text-xs font-bold text-amber-800 whitespace-nowrap px-2.5 py-2 bg-amber-100 rounded-lg border border-amber-200">
+                      {selectedRequest.unit}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-700">
+                    Total pengajuan: <strong>{selectedRequest.qty} {selectedRequest.unit}</strong>. Hanya jumlah diterima (<strong>{receiptForm.received_qty || 0} {selectedRequest.unit}</strong>) yang otomatis masuk ke stok persediaan.
+                  </p>
+                </div>
+              )}
+
+              {receiptForm.receipt_status === 'Diterima' && (
+                <div className="bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 text-xs text-emerald-800 flex justify-between items-center">
+                  <span>Jumlah diterima penuh otomatis:</span>
+                  <strong className="font-bold">{selectedRequest.qty} {selectedRequest.unit}</strong>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -906,7 +977,7 @@ const PurchaseRequests = ({ role = 'admin' }) => {
               </div>
 
               <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-200 text-xs text-emerald-900">
-                💡 <em>Catatan Sesuai PDF: Apabila status diubah menjadi <strong>Diterima</strong>, stok barang di sistem akan otomatis bertambah pada master persediaan dan kartu stok.</em>
+                💡 <em>Catatan: Apabila status diubah menjadi <strong>Diterima</strong> atau <strong>Diterima Sebagian</strong>, stok barang di sistem otomatis bertambah pada master persediaan dan kartu stok sesuai jumlah yang diterima.</em>
               </div>
 
               <div className="flex space-x-3 pt-2">

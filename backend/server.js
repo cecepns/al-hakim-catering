@@ -41,6 +41,36 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
+// Auto-check and add new columns if not present (Revision Nov 2026)
+async function ensureRevisionsSchema() {
+  try {
+    const [colsPR] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_requests' AND COLUMN_NAME = 'received_qty'`
+    );
+    if (colsPR.length === 0) {
+      await pool.query('ALTER TABLE `purchase_requests` ADD COLUMN `received_qty` DECIMAL(15,2) NULL AFTER `receipt_status`');
+      console.log('Added received_qty column to purchase_requests');
+    }
+  } catch (err) {
+    console.error('ensureRevisionsSchema purchase_requests error:', err.message);
+  }
+
+  try {
+    const [colsIO] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_opname' AND COLUMN_NAME = 'action'`
+    );
+    if (colsIO.length === 0) {
+      await pool.query('ALTER TABLE `inventory_opname` ADD COLUMN `action` TEXT NULL AFTER `notes`');
+      console.log('Added action column to inventory_opname');
+    }
+  } catch (err) {
+    console.error('ensureRevisionsSchema inventory_opname error:', err.message);
+  }
+}
+ensureRevisionsSchema();
+
 
 // ========================================
 // FINANCIAL & ACCOUNTING HELPER FUNCTIONS
@@ -110,8 +140,19 @@ async function recordOrderSalesFinancials(connection, orderId, paymentMethod, pa
          VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Pendapatan Penjualan', 'created')`,
         [cfRes.insertId, userId || null, nominalDp, `Penerimaan DP pesanan #${orderId}`]
       );
+    } else if (normalizedMethod === 'cod') {
+      // COD: Sesuai revisi client, tidak ada pembayaran di awal.
+      // Arus kas TIDAK dicatat saat pembuatan pesanan.
+      // Pembayaran seluruhnya baru masuk arus kas setelah pesanan selesai.
+      // Neraca: Dicatat sebagai Piutang Usaha (Debit) dan Pendapatan Penjualan (Kredit)
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (CURRENT_DATE, 'order', ?, ?, 'Piutang Usaha', 'Pendapatan Penjualan', ?, ?)`,
+        [orderId, `Penjualan pesanan COD #${orderId} (Menunggu Pembayaran saat Selesai)`, finalTotal, userId || null]
+      );
     } else {
-      // COD, Transfer, Tunai
+      // Transfer, Tunai (Lunas di awal)
       // 1. Neraca: Debit Kas, Kredit Pendapatan Penjualan
       await connection.query(
         `INSERT INTO accounting_journal_entries 
@@ -184,6 +225,54 @@ async function recordOrderDpSettlement(connection, orderId, sisaAmount, userId) 
     );
   } catch (error) {
     console.error('recordOrderDpSettlement error:', error);
+  }
+}
+
+/**
+ * 2b. Pembayaran COD Pesanan saat Selesai
+ * Sesuai revisi client:
+ * COD tidak ada pembayaran di awal. Pembayaran seluruhnya baru masuk arus kas setelah pesanan selesai.
+ * Neraca: Debit Kas, Kredit Piutang Usaha
+ * Arus Kas: Operasi -> Penjualan (sebesar total final_amount)
+ */
+async function recordOrderCodSettlement(connection, orderId, finalAmount, userId) {
+  try {
+    const amount = parseFloat(finalAmount) || 0;
+    if (amount <= 0) return;
+
+    // Check if COD cash flow already recorded to prevent duplicate
+    const [existing] = await connection.query(
+      'SELECT id FROM cash_flow_transactions WHERE order_id = ? AND description LIKE "%COD%"',
+      [orderId]
+    );
+    if (existing.length > 0) {
+      return;
+    }
+
+    // 1. Neraca: Debit Kas, Kredit Piutang Usaha
+    await connection.query(
+      `INSERT INTO accounting_journal_entries 
+       (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+       VALUES (CURRENT_DATE, 'order', ?, ?, 'Kas', 'Piutang Usaha', ?, ?)`,
+      [orderId, `Pembayaran COD pesanan #${orderId}`, amount, userId || null]
+    );
+
+    // 2. Arus Kas: Operasi -> Penjualan (Kas masuk seluruh pembayaran)
+    const [cfRes] = await connection.query(
+      `INSERT INTO cash_flow_transactions 
+       (type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+       VALUES ('income', 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', ?, ?, ?, ?)`,
+      [amount, `Penerimaan pembayaran COD pesanan #${orderId}`, orderId, userId || null]
+    );
+
+    await connection.query(
+      `INSERT INTO cash_flow_edit_history 
+       (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+       VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', 'created')`,
+      [cfRes.insertId, userId || null, amount, `Penerimaan pembayaran COD pesanan #${orderId}`]
+    );
+  } catch (error) {
+    console.error('recordOrderCodSettlement error:', error);
   }
 }
 
@@ -1744,6 +1833,40 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       } catch (error) {
         console.error('Error updating order completion status:', error);
       }
+
+      // Integrasi Arus Kas saat Pesanan Selesai (Revisi: DP pelunasan & COD masuk kas setelah pesanan selesai)
+      try {
+        const [orders] = await pool.query('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+        if (orders.length > 0) {
+          const o = orders[0];
+          const method = (o.payment_method || '').toLowerCase();
+          const finalTotal = parseFloat(o.final_amount) || 0;
+
+          if (method === 'dp') {
+            const nominalDp = parseFloat(o.payment_amount) > 0 ? parseFloat(o.payment_amount) : (finalTotal * 0.5);
+            const remaining = Math.max(0, finalTotal - nominalDp);
+            if (remaining > 0) {
+              const conn = await pool.getConnection();
+              try {
+                await recordOrderDpSettlement(conn, o.id, remaining, req.user.id);
+                await conn.query('UPDATE orders SET payment_status = "paid" WHERE id = ?', [o.id]);
+              } finally {
+                conn.release();
+              }
+            }
+          } else if (method === 'cod') {
+            const conn = await pool.getConnection();
+            try {
+              await recordOrderCodSettlement(conn, o.id, finalTotal, req.user.id);
+              await conn.query('UPDATE orders SET payment_status = "paid" WHERE id = ?', [o.id]);
+            } finally {
+              conn.release();
+            }
+          }
+        }
+      } catch (finErr) {
+        console.error('Error recording completion cash flow:', finErr);
+      }
     }
 
     // Update commission status and refund if order is cancelled (Halaman 9 & 10 PDF)
@@ -2859,17 +2982,29 @@ app.put('/api/admin/orders/:id/payment-status', authenticateToken, authorizeRole
       [payment_status, id]
     );
 
-    // Jika berubah menjadi 'paid' dari 'partial'/'pending' dan metode adalah 'dp'
-    // Catat Pelunasan DP (Halaman 4 PDF): Debit Kas, Kredit Piutang Usaha
-    if (payment_status === 'paid' && previousPaymentStatus !== 'paid' && order.payment_method === 'dp') {
+    // Jika berubah menjadi 'paid' dari 'partial'/'pending'
+    // DP: Catat Pelunasan DP (Debit Kas, Kredit Piutang Usaha)
+    // COD: Catat Pembayaran Penuh COD (Debit Kas, Kredit Piutang Usaha)
+    if (payment_status === 'paid' && previousPaymentStatus !== 'paid') {
       const finalAmount = parseFloat(order.final_amount) || 0;
-      const dpPaid = parseFloat(order.payment_amount) > 0 ? parseFloat(order.payment_amount) : (finalAmount * 0.5);
-      const remaining = Math.max(0, finalAmount - dpPaid);
+      const method = (order.payment_method || '').toLowerCase();
 
-      if (remaining > 0) {
+      if (method === 'dp') {
+        const dpPaid = parseFloat(order.payment_amount) > 0 ? parseFloat(order.payment_amount) : (finalAmount * 0.5);
+        const remaining = Math.max(0, finalAmount - dpPaid);
+
+        if (remaining > 0) {
+          const connection = await pool.getConnection();
+          try {
+            await recordOrderDpSettlement(connection, id, remaining, req.user.id);
+          } finally {
+            connection.release();
+          }
+        }
+      } else if (method === 'cod') {
         const connection = await pool.getConnection();
         try {
-          await recordOrderDpSettlement(connection, id, remaining, req.user.id);
+          await recordOrderCodSettlement(connection, id, finalAmount, req.user.id);
         } finally {
           connection.release();
         }
@@ -5196,88 +5331,140 @@ app.get('/api/inventory/opname', authenticateToken, async (req, res) => {
   }
 });
 
-// Create stok opname entry
+// Create stok opname entry (single or batch)
 app.post('/api/inventory/opname', authenticateToken, async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const { inventory_item_id, date, physical_stock, notes, sync_stock = false } = req.body;
+    const { 
+      items: batchItems, 
+      inventory_item_id, 
+      date, 
+      physical_stock, 
+      notes, 
+      action, 
+      general_action, 
+      sync_stock = true 
+    } = req.body;
 
-    if (!inventory_item_id || physical_stock === undefined || physical_stock === null) {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Item persediaan dan stok fisik wajib diisi' });
-    }
-
-    const [items] = await connection.query(
-      'SELECT id, name, unit, stock FROM inventory_items WHERE id = ? FOR UPDATE',
-      [inventory_item_id]
-    );
-
-    if (items.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: 'Barang persediaan tidak ditemukan' });
-    }
-
-    const item = items[0];
-    const systemStock = parseFloat(item.stock);
-    const physicalStock = parseFloat(physical_stock);
-    const difference = physicalStock - systemStock;
     const opnameDate = date || new Date().toISOString().split('T')[0];
+    const overallAction = action || general_action || null;
 
-    // Insert opname record
-    const [opnameRes] = await connection.query(
-      `INSERT INTO inventory_opname 
-         (inventory_item_id, date, system_stock, physical_stock, difference, notes, checked_by) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [inventory_item_id, opnameDate, systemStock, physicalStock, difference, notes || null, req.user.id]
-    );
+    let itemsToProcess = [];
+    if (Array.isArray(batchItems) && batchItems.length > 0) {
+      itemsToProcess = batchItems.filter(
+        (it) => it.physical_stock !== undefined && it.physical_stock !== null && it.physical_stock !== ''
+      );
+    } else if (inventory_item_id && physical_stock !== undefined && physical_stock !== null && physical_stock !== '') {
+      itemsToProcess = [{
+        inventory_item_id,
+        physical_stock,
+        notes: notes || null,
+        action: action || null
+      }];
+    }
 
-    // If sync_stock is true and there is a difference, adjust system stock to match physical stock
-    if (sync_stock && difference !== 0) {
-      await connection.query(
-        'UPDATE inventory_items SET stock = ? WHERE id = ?',
-        [physicalStock, inventory_item_id]
+    if (itemsToProcess.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Tidak ada data stok fisik yang diisi untuk disimpan' });
+    }
+
+    const savedRecords = [];
+
+    for (const entry of itemsToProcess) {
+      const itemId = entry.inventory_item_id;
+      const [itemRows] = await connection.query(
+        'SELECT id, name, unit, stock FROM inventory_items WHERE id = ? FOR UPDATE',
+        [itemId]
       );
 
-      let stockIn = 0;
-      let stockOut = 0;
-      if (difference > 0) {
-        stockIn = difference;
-      } else {
-        stockOut = Math.abs(difference);
+      if (itemRows.length === 0) continue;
+
+      const item = itemRows[0];
+      const systemStock = parseFloat(item.stock);
+      const physicalStock = parseFloat(entry.physical_stock);
+      const difference = physicalStock - systemStock;
+      const itemNotes = entry.notes || (itemsToProcess.length === 1 ? notes : null) || null;
+      const itemAction = entry.action || overallAction || null;
+
+      // Insert into inventory_opname
+      let opnameInsertId;
+      try {
+        const [opnameRes] = await connection.query(
+          `INSERT INTO inventory_opname 
+             (inventory_item_id, date, system_stock, physical_stock, difference, notes, action, checked_by) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [itemId, opnameDate, systemStock, physicalStock, difference, itemNotes, itemAction, req.user.id]
+        );
+        opnameInsertId = opnameRes.insertId;
+      } catch (insertErr) {
+        if (insertErr.code === 'ER_BAD_FIELD_ERROR') {
+          // If action column missing, fallback
+          const [opnameRes] = await connection.query(
+            `INSERT INTO inventory_opname 
+               (inventory_item_id, date, system_stock, physical_stock, difference, notes, checked_by) 
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [itemId, opnameDate, systemStock, physicalStock, difference, itemNotes ? `${itemNotes} (Tindakan: ${itemAction || '-'})` : (itemAction ? `Tindakan: ${itemAction}` : null), req.user.id]
+          );
+          opnameInsertId = opnameRes.insertId;
+        } else {
+          throw insertErr;
+        }
       }
 
-      await connection.query(
-        `INSERT INTO inventory_stock_logs 
-           (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'opname', ?, ?)`,
-        [
-          inventory_item_id,
-          opnameDate,
-          systemStock,
-          stockIn,
-          stockOut,
-          physicalStock,
-          `Penyesuaian stok opname (${difference > 0 ? '+' : ''}${difference})${notes ? ': ' + notes : ''}`,
-          opnameRes.insertId,
-          req.user.id
-        ]
-      );
+      // If sync_stock is true and difference !== 0, adjust inventory_items stock and record log
+      if (sync_stock && difference !== 0) {
+        await connection.query(
+          'UPDATE inventory_items SET stock = ? WHERE id = ?',
+          [physicalStock, itemId]
+        );
+
+        const stockIn = difference > 0 ? difference : 0;
+        const stockOut = difference < 0 ? Math.abs(difference) : 0;
+
+        const logNoteParts = [];
+        logNoteParts.push(`Penyesuaian stok opname (${difference > 0 ? '+' : ''}${difference} ${item.unit})`);
+        if (itemNotes) logNoteParts.push(`Alasan: ${itemNotes}`);
+        if (itemAction) logNoteParts.push(`Tindakan: ${itemAction}`);
+
+        await connection.query(
+          `INSERT INTO inventory_stock_logs 
+             (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'opname', ?, ?)`,
+          [
+            itemId,
+            opnameDate,
+            systemStock,
+            stockIn,
+            stockOut,
+            physicalStock,
+            logNoteParts.join(' | '),
+            opnameInsertId,
+            req.user.id
+          ]
+        );
+      }
+
+      savedRecords.push({
+        id: opnameInsertId,
+        inventory_item_id: itemId,
+        difference
+      });
     }
 
     await connection.commit();
 
     res.status(201).json({
-      message: 'Stok opname berhasil disimpan',
-      opnameId: opnameRes.insertId,
-      difference,
+      message: `Stok opname berhasil disimpan untuk ${savedRecords.length} barang`,
+      count: savedRecords.length,
+      records: savedRecords,
       synced: Boolean(sync_stock)
     });
   } catch (error) {
     await connection.rollback();
     console.error('Create opname error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan stok opname' });
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan stok opname: ' + (error.sqlMessage || error.message) });
   } finally {
     connection.release();
   }
@@ -6047,23 +6234,52 @@ app.put('/api/purchase-requests/:id/receipt', authenticateToken, async (req, res
     }
 
     const request = rows[0];
-    const previousReceiptStatus = request.receipt_status;
-    const qtyReceived = received_qty !== undefined && received_qty !== null ? parseFloat(received_qty) : parseFloat(request.qty);
+    let qtyReceived = 0;
+    if (receipt_status === 'Diterima') {
+      qtyReceived = parseFloat(request.qty);
+    } else if (receipt_status === 'Diterima Sebagian') {
+      qtyReceived = received_qty !== undefined && received_qty !== null ? parseFloat(received_qty) : parseFloat(request.qty);
+    } else {
+      qtyReceived = 0;
+    }
 
-    await connection.query(
-      `UPDATE purchase_requests 
-         SET receipt_status = ?, received_qty = ?, receipt_notes = ? 
-         WHERE id = ?`,
-      [receipt_status, qtyReceived, receipt_notes || null, id]
-    );
+    // Update purchase_requests record with receipt status & received_qty (safely handle if column not yet migrated)
+    try {
+      await connection.query(
+        `UPDATE purchase_requests 
+           SET receipt_status = ?, received_qty = ?, receipt_notes = ? 
+           WHERE id = ?`,
+        [receipt_status, qtyReceived, receipt_notes || null, id]
+      );
+    } catch (dbErr) {
+      if (dbErr.code === 'ER_BAD_FIELD_ERROR') {
+        try {
+          await connection.query('ALTER TABLE `purchase_requests` ADD COLUMN `received_qty` DECIMAL(15,2) NULL AFTER `receipt_status`');
+          await connection.query(
+            `UPDATE purchase_requests 
+               SET receipt_status = ?, received_qty = ?, receipt_notes = ? 
+               WHERE id = ?`,
+            [receipt_status, qtyReceived, receipt_notes || null, id]
+          );
+        } catch (alterErr) {
+          await connection.query(
+            `UPDATE purchase_requests 
+               SET receipt_status = ?, receipt_notes = ? 
+               WHERE id = ?`,
+            [receipt_status, receipt_notes || null, id]
+          );
+        }
+      } else {
+        throw dbErr;
+      }
+    }
 
-    // Jika barang diterima dan update_stock aktif, tambahkan ke stok persediaan
-    if (
-      update_stock &&
-      (receipt_status === 'Diterima' || receipt_status === 'Diterima Sebagian') &&
-      previousReceiptStatus !== 'Diterima' &&
-      qtyReceived > 0
-    ) {
+    // Hitung perubahan stok dibandingkan penerimaan sebelumnya
+    const prevReceivedQty = parseFloat(request.received_qty) || 0;
+    const diffStock = qtyReceived - prevReceivedQty;
+
+    // Jika ada penambahan atau pengurangan stok yang harus dicatat
+    if (update_stock && diffStock !== 0) {
       let itemId = request.inventory_item_id;
 
       // Jika belum ada inventory_item_id, buat atau cari item
@@ -6091,23 +6307,27 @@ app.put('/api/purchase-requests/:id/receipt', authenticateToken, async (req, res
 
       if (itemRows.length > 0) {
         const stockInitial = parseFloat(itemRows[0].stock);
-        const stockFinal = stockInitial + qtyReceived;
+        const stockFinal = Math.max(0, stockInitial + diffStock);
 
         await connection.query(
           'UPDATE inventory_items SET stock = ? WHERE id = ?',
           [stockFinal, itemId]
         );
 
+        const stockIn = diffStock > 0 ? diffStock : 0;
+        const stockOut = diffStock < 0 ? Math.abs(diffStock) : 0;
+
         await connection.query(
           `INSERT INTO inventory_stock_logs 
              (inventory_item_id, date, stock_initial, stock_in, stock_out, stock_final, notes, reference_type, reference_id, created_by) 
-             VALUES (?, CURRENT_DATE, ?, ?, 0, ?, ?, 'purchase', ?, ?)`,
+             VALUES (?, CURRENT_DATE, ?, ?, ?, ?, ?, 'purchase', ?, ?)`,
           [
             itemId,
             stockInitial,
-            qtyReceived,
+            stockIn,
+            stockOut,
             stockFinal,
-            `Penerimaan pengajuan pembelian #${request.request_no}: ${request.item_name}`,
+            `Penerimaan pengajuan pembelian #${request.request_no} (${receipt_status}${qtyReceived > 0 ? ': ' + qtyReceived + ' ' + request.unit : ''}): ${request.item_name}`,
             id,
             req.user.id
           ]
@@ -6117,11 +6337,14 @@ app.put('/api/purchase-requests/:id/receipt', authenticateToken, async (req, res
 
     await connection.commit();
 
-    res.json({ message: 'Status penerimaan barang berhasil diperbarui' });
+    res.json({ 
+      message: 'Status penerimaan barang berhasil diperbarui',
+      received_qty: qtyReceived
+    });
   } catch (error) {
     await connection.rollback();
     console.error('Receipt update error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui status penerimaan' });
+    res.status(500).json({ message: 'Terjadi kesalahan saat memperbarui status penerimaan: ' + (error.sqlMessage || error.message) });
   } finally {
     connection.release();
   }

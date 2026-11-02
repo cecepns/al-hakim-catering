@@ -368,24 +368,24 @@ const OrderProcessCostSection = ({
                           }`}
                         >
                           {/* Nama Bahan & Checkbox */}
-                          <div className="flex items-center space-x-2.5 flex-1 min-w-0 pr-2">
+                          <div className="flex items-start sm:items-center space-x-2.5 flex-1 min-w-0 pr-2">
                             <input
                               type="checkbox"
                               id={`mat-item-${item.id}`}
                               checked={isChecked}
                               onChange={(e) => onToggleMaterial(item.id, e.target.checked)}
-                              className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4 cursor-pointer"
+                              className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 h-4 w-4 cursor-pointer flex-shrink-0 mt-0.5 sm:mt-0"
                             />
                             <label
                               htmlFor={`mat-item-${item.id}`}
-                              className="text-xs font-medium text-gray-800 cursor-pointer truncate"
+                              className="text-xs font-medium text-gray-800 cursor-pointer break-words leading-tight"
                             >
                               {item.name}
                             </label>
                           </div>
 
                           {/* Input Jumlah */}
-                          <div className="flex items-center space-x-1.5 w-32 flex-shrink-0">
+                          <div className="flex items-center space-x-1.5 w-28 sm:w-32 flex-shrink-0 ml-2">
                             <input
                               type="number"
                               min="0.01"
