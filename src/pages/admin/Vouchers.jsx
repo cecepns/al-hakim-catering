@@ -65,8 +65,8 @@ const AdminVouchers = () => {
       min_purchase: voucher.min_purchase,
       max_discount: voucher.max_discount,
       quota: voucher.quota,
-      valid_from: voucher.valid_from.split(' ')[0],
-      valid_until: voucher.valid_until.split(' ')[0],
+      valid_from: String(voucher.valid_from || '').split('T')[0].split(' ')[0],
+      valid_until: String(voucher.valid_until || '').split('T')[0].split(' ')[0],
     });
     setModal(true);
   };

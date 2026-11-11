@@ -1,11 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderAPI, orderCostsAPI, inventoryAPI } from '../../utils/api';
+import { orderAPI, orderCostsAPI, inventoryAPI, orderIssuesAPI } from '../../utils/api';
 import { parseDeliveryNotes, formatRupiah } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
 import OrderCostManagement from '../../components/OrderCostManagement';
 import OrderProcessCostSection from '../../components/OrderProcessCostSection';
+import PackagingStandardsSection from '../../components/PackagingStandardsSection';
+import OrderDeliveryEquipmentSection from '../../components/OrderDeliveryEquipmentSection';
+import OrderIssuesListSection from '../../components/OrderIssuesListSection';
+import ReportIssueBox from '../../components/ReportIssueBox';
 
 const DapurOrderDetail = () => {
   const { id } = useParams();
@@ -16,11 +20,25 @@ const DapurOrderDetail = () => {
   const [notes, setNotes] = useState('');
   const [proofFile, setProofFile] = useState(null);
   const [proofPreview, setProofPreview] = useState('');
-  const [checklist, setChecklist] = useState(null);
-  const [checklistLoading, setChecklistLoading] = useState(true);
-  const [savingChecklist, setSavingChecklist] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
+
+  // States for Laporkan Kendala
+  const [hasIssue, setHasIssue] = useState(false);
+  const [issueData, setIssueData] = useState({
+    issue_type: '',
+    issue_cause: '',
+    issue_follow_up: '',
+    issue_solution: '',
+  });
+  const [standaloneIssueChecked, setStandaloneIssueChecked] = useState(false);
+  const [standaloneIssueData, setStandaloneIssueData] = useState({
+    issue_type: '',
+    issue_cause: '',
+    issue_follow_up: '',
+    issue_solution: '',
+  });
+  const [submittingIssue, setSubmittingIssue] = useState(false);
 
   // States for MODAL & HPP on update status diproses (Revisi Gambar 1)
   const [inventoryItems, setInventoryItems] = useState([]);
@@ -98,29 +116,10 @@ const DapurOrderDetail = () => {
     }
   }, [id]);
 
-  const fetchChecklist = useCallback(async () => {
-    try {
-      setChecklistLoading(true);
-      const response = await orderAPI.getChecklist(id);
-      // Parse checklist_data if it's a string
-      let checklistData = response.data.checklist_data;
-      if (typeof checklistData === 'string') {
-        checklistData = JSON.parse(checklistData);
-      }
-      setChecklist(checklistData);
-    } catch (error) {
-      console.error('Error fetching checklist:', error);
-      setChecklist(null);
-    } finally {
-      setChecklistLoading(false);
-    }
-  }, [id]);
-
   useEffect(() => {
     fetchOrder();
-    fetchChecklist();
     fetchInventory();
-  }, [fetchOrder, fetchChecklist, fetchInventory]);
+  }, [fetchOrder, fetchInventory]);
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -134,43 +133,14 @@ const DapurOrderDetail = () => {
     }
   };
 
-  const toggleChecklistItem = (sectionId, itemId) => {
-    setChecklist(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const section = updated.sections.find(s => s.id === sectionId);
-      if (section) {
-        const item = section.items.find(i => i.id === itemId);
-        if (item) {
-          item.checked = !item.checked;
-        }
-      }
-      return updated;
-    });
-  };
-
-  const isChecklistComplete = () => {
-    if (!checklist || !checklist.sections) return false;
-    return checklist.sections.every(section =>
-      section.items.every(item => item.checked)
-    );
-  };
-
-  const handleSaveChecklist = async () => {
-    try {
-      setSavingChecklist(true);
-      await orderAPI.saveChecklist(id, { checklist_data: checklist });
-      alert('Checklist berhasil disimpan');
-    } catch (error) {
-      console.error('Error saving checklist:', error);
-      alert('Gagal menyimpan checklist');
-    } finally {
-      setSavingChecklist(false);
-    }
-  };
-
   const handleStartProcessing = async () => {
     if (!proofFile) {
       alert('Upload bukti foto/video proses terlebih dahulu');
+      return;
+    }
+
+    if (hasIssue && !issueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi jika Laporkan kendala dicentang');
       return;
     }
 
@@ -180,6 +150,14 @@ const DapurOrderDetail = () => {
       formData.append('status', 'diproses');
       formData.append('notes', notes || 'Pesanan mulai diproses dapur');
       formData.append('proof', proofFile);
+
+      if (hasIssue) {
+        formData.append('has_issue', 'true');
+        formData.append('issue_type', issueData.issue_type.trim());
+        formData.append('issue_cause', issueData.issue_cause || '');
+        formData.append('issue_follow_up', issueData.issue_follow_up || '');
+        formData.append('issue_solution', issueData.issue_solution || '');
+      }
 
       await orderAPI.updateStatus(id, formData);
 
@@ -198,7 +176,7 @@ const DapurOrderDetail = () => {
 
       // 2. Simpan bahan baku jika ada yang dicentang
       const selectedMaterials = Object.entries(materialsState)
-        .filter(([_, val]) => val?.checked && parseFloat(val?.quantity) > 0)
+        .filter(([, val]) => val?.checked && parseFloat(val?.quantity) > 0)
         .map(([itemId, val]) => ({
           inventory_item_id: itemId,
           quantity: parseFloat(val.quantity)
@@ -214,6 +192,8 @@ const DapurOrderDetail = () => {
       setProofPreview('');
       setModalRows([]);
       setMaterialsState({});
+      setHasIssue(false);
+      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -224,6 +204,11 @@ const DapurOrderDetail = () => {
   };
 
   const handleComplete = async () => {
+    if (hasIssue && !issueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi jika Laporkan kendala dicentang');
+      return;
+    }
+
     if (!window.confirm('Yakin pesanan sudah selesai dan siap dikirim?')) return;
 
     try {
@@ -232,7 +217,17 @@ const DapurOrderDetail = () => {
       formData.append('status', 'siap-kirim');
       formData.append('notes', 'Pesanan selesai diproses dan siap dikirim');
 
+      if (hasIssue) {
+        formData.append('has_issue', 'true');
+        formData.append('issue_type', issueData.issue_type.trim());
+        formData.append('issue_cause', issueData.issue_cause || '');
+        formData.append('issue_follow_up', issueData.issue_follow_up || '');
+        formData.append('issue_solution', issueData.issue_solution || '');
+      }
+
       await orderAPI.updateStatus(id, formData);
+      setHasIssue(false);
+      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
       alert('Pesanan selesai dan siap untuk dikirim!');
       navigate('/dapur/dashboard');
     } catch (error) {
@@ -240,6 +235,31 @@ const DapurOrderDetail = () => {
       alert(error.response?.data?.message || 'Gagal menyelesaikan pesanan');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleSubmitStandaloneIssue = async () => {
+    if (!standaloneIssueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi');
+      return;
+    }
+    try {
+      setSubmittingIssue(true);
+      await orderIssuesAPI.create(id, {
+        issue_type: standaloneIssueData.issue_type.trim(),
+        cause: standaloneIssueData.issue_cause || '',
+        follow_up: standaloneIssueData.issue_follow_up || '',
+        solution: standaloneIssueData.issue_solution || '',
+      });
+      alert('Kendala berhasil dilaporkan ke dashboard Admin & Operasional');
+      setStandaloneIssueChecked(false);
+      setStandaloneIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+      fetchOrder();
+    } catch (error) {
+      console.error('Error reporting standalone issue:', error);
+      alert(error.response?.data?.message || 'Gagal melaporkan kendala');
+    } finally {
+      setSubmittingIssue(false);
     }
   };
 
@@ -332,6 +352,11 @@ const DapurOrderDetail = () => {
                         <p className="font-semibold text-gray-900 text-lg">{item.product_name}</p>
                         {item.variant_name && (
                           <p className="text-sm text-gray-600 mt-1">Varian: {item.variant_name}</p>
+                        )}
+                        {item.variant_notes && (
+                          <p className="text-xs text-purple-800 bg-purple-50 px-2 py-0.5 rounded inline-block mt-1">
+                            Catatan variasi: {item.variant_notes}
+                          </p>
                         )}
                         {addons.length > 0 && (
                           <div className="mt-1">
@@ -435,8 +460,17 @@ const DapurOrderDetail = () => {
               </div>
             )}
 
+            {/* Standar Pengemasan (Otomatis per Kategori) */}
+            <PackagingStandardsSection order={order} canEdit={false} />
+
             {/* MODAL & HPP PESANAN (Halaman 8 & 9 PDF) */}
             <OrderCostManagement orderId={id} onUpdated={fetchOrder} />
+
+            {/* Checklist Perlengkapan Pengantaran (Dapur) */}
+            <OrderDeliveryEquipmentSection orderId={id} mode="dapur" />
+
+            {/* Daftar Kendala Pesanan */}
+            <OrderIssuesListSection issues={order.issues} canResolve={false} onResolved={fetchOrder} />
           </div>
 
           {/* Action Panel */}
@@ -493,6 +527,13 @@ const DapurOrderDetail = () => {
                     loading={loadingInventory}
                   />
 
+                  <ReportIssueBox
+                    checked={hasIssue}
+                    onCheckedChange={setHasIssue}
+                    values={issueData}
+                    onChange={setIssueData}
+                  />
+
                   <button
                     onClick={handleStartProcessing}
                     disabled={!proofFile || processing}
@@ -505,11 +546,17 @@ const DapurOrderDetail = () => {
             )}
 
             {order.status === 'diproses' && (
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Selesaikan Pesanan</h2>
-                <p className="text-sm text-gray-600 mb-4">
+              <div className="bg-white rounded-xl shadow-lg p-6 space-y-4">
+                <h2 className="text-lg font-semibold text-gray-900">Selesaikan Pesanan</h2>
+                <p className="text-sm text-gray-600">
                   Klik tombol di bawah jika pesanan sudah selesai dan siap untuk dikirim
                 </p>
+                <ReportIssueBox
+                  checked={hasIssue}
+                  onCheckedChange={setHasIssue}
+                  values={issueData}
+                  onChange={setIssueData}
+                />
                 <button
                   onClick={handleComplete}
                   disabled={processing}
@@ -520,65 +567,27 @@ const DapurOrderDetail = () => {
               </div>
             )}
 
-            {/* Kitchen Checklist */}
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">Checklist Dapur & Produksi</h2>
-                {isChecklistComplete() && (
-                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
-                    ✓ Lengkap
-                  </span>
-                )}
-              </div>
-
-              {checklistLoading ? (
-                <div className="flex justify-center py-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-                </div>
-              ) : checklist ? (
-                <div className="space-y-6">
-                  {checklist.sections.map((section) => (
-                    <div key={section.id} className="border rounded-lg p-4 bg-gray-50">
-                      <h3 className="font-semibold text-sm text-gray-900 mb-3">{section.title}</h3>
-                      <div className="space-y-2">
-                        {section.items.map((item) => (
-                          <label key={item.id} className="flex items-start space-x-3 cursor-pointer hover:bg-white p-2 rounded transition">
-                            <div className="flex items-center h-5">
-                              <input
-                                type="checkbox"
-                                checked={item.checked}
-                                onChange={() => toggleChecklistItem(section.id, item.id)}
-                                className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                              />
-                            </div>
-                            <div className="flex-1">
-                              <span className={`text-sm ${item.checked ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
-                                {item.text}
-                              </span>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="flex gap-3 mt-4">
-                    <button
-                      onClick={handleSaveChecklist}
-                      disabled={savingChecklist}
-                      className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-semibold transition text-sm"
-                    >
-                      {savingChecklist ? 'Menyimpan...' : 'Simpan Checklist'}
-                    </button>
-                    {isChecklistComplete() && (
-                      <div className="flex-1 bg-green-50 border border-green-200 rounded-lg flex items-center justify-center">
-                        <span className="text-green-700 text-sm font-semibold">✓ Siap Diproses</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-gray-600 text-sm">Gagal memuat checklist</p>
+            {/* Standalone Laporkan Kendala (muncul kapan saja) */}
+            <div className="bg-white rounded-xl shadow-lg p-6 space-y-3">
+              <h2 className="text-lg font-semibold text-gray-900">Kendala Produksi / Dapur</h2>
+              <p className="text-xs text-gray-500">
+                Laporkan kendala kapan saja tanpa mengubah status pesanan (otomatis masuk ke Admin & Operasional).
+              </p>
+              <ReportIssueBox
+                checked={standaloneIssueChecked}
+                onCheckedChange={setStandaloneIssueChecked}
+                values={standaloneIssueData}
+                onChange={setStandaloneIssueData}
+              />
+              {standaloneIssueChecked && (
+                <button
+                  type="button"
+                  onClick={handleSubmitStandaloneIssue}
+                  disabled={submittingIssue || !standaloneIssueData.issue_type.trim()}
+                  className="w-full bg-amber-600 text-white px-4 py-2.5 rounded-lg hover:bg-amber-700 disabled:bg-gray-400 font-semibold text-sm transition"
+                >
+                  {submittingIssue ? 'Mengirim Laporan...' : 'Kirim Laporan Kendala'}
+                </button>
               )}
             </div>
           </div>

@@ -36,6 +36,7 @@ const InvoiceModal = ({ isOpen, onClose, orderId }) => {
         scale: 2,
         useCORS: true,
         logging: false,
+        backgroundColor: '#ffffff',
       });
 
       const imgData = canvas.toDataURL('image/png');
@@ -71,6 +72,7 @@ const InvoiceModal = ({ isOpen, onClose, orderId }) => {
         scale: 2,
         useCORS: true,
         logging: false,
+        backgroundColor: '#ffffff',
       });
 
       const imgData = canvas.toDataURL('image/png');

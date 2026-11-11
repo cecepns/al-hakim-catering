@@ -224,6 +224,16 @@ const PembeliOrderDetail = () => {
                   <div>
                     <p className="font-medium text-gray-900">{item.product_name}</p>
                     {item.variant_name && <p className="text-sm text-gray-600">Varian: {item.variant_name}</p>}
+                    {item.variant_notes && (
+                      <p className="text-xs text-purple-800 bg-purple-50 px-2 py-0.5 rounded inline-block mt-1">
+                        Catatan variasi: {item.variant_notes}
+                      </p>
+                    )}
+                    {Number(item.product_discount_amount) > 0 && (
+                      <p className="text-xs text-green-700 mt-0.5">
+                        Diskon Produk ({item.discount_percentage}%): -Rp {formatRupiah(item.product_discount_amount)}
+                      </p>
+                    )}
                     {addons.length > 0 && (
                       <div className="mt-1">
                         <p className="text-sm font-medium text-gray-700">Add-on:</p>
@@ -249,28 +259,58 @@ const PembeliOrderDetail = () => {
             })}
           </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-gray-700">
-              <span>Subtotal:</span>
-              <span>Rp {formatRupiah(order.total_amount)}</span>
-            </div>
-            {order.discount_amount > 0 && (
-              <div className="flex justify-between text-green-600">
-                <span>Diskon:</span>
-                <span>- Rp {formatRupiah(order.discount_amount)}</span>
+          {(() => {
+            const totalProductDiscount = (order.items || []).reduce(
+              (sum, it) => sum + (Number(it.product_discount_amount) || 0),
+              0
+            );
+            const subtotalAfterProduct = Number(order.total_amount || 0);
+            const normalSubtotal = subtotalAfterProduct + totalProductDiscount;
+            return (
+              <div className="space-y-2">
+                {totalProductDiscount > 0 && (
+                  <>
+                    <div className="flex justify-between text-gray-600 text-sm">
+                      <span>Harga Awal:</span>
+                      <span>Rp {formatRupiah(normalSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-green-600 text-sm">
+                      <span>Diskon Produk:</span>
+                      <span>- Rp {formatRupiah(totalProductDiscount)}</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between text-gray-700">
+                  <span>Subtotal:</span>
+                  <span>Rp {formatRupiah(order.total_amount)}</span>
+                </div>
+                {order.discount_amount > 0 && (
+                  <div className="flex justify-between text-green-600">
+                    <span>
+                      Diskon Voucher{order.voucher_code ? ` (${order.voucher_code})` : ''}:
+                    </span>
+                    <span>- Rp {formatRupiah(order.discount_amount)}</span>
+                  </div>
+                )}
+                {order.cashback_used > 0 && (
+                  <div className="flex justify-between text-primary-600">
+                    <span>Cashback:</span>
+                    <span>- Rp {formatRupiah(order.cashback_used)}</span>
+                  </div>
+                )}
+                {Number(order.margin_amount) > 0 && (
+                  <div className="flex justify-between text-gray-700">
+                    <span>Margin Tambahan:</span>
+                    <span>+ Rp {formatRupiah(order.margin_amount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-xl font-bold text-gray-900 pt-3 border-t">
+                  <span>Total:</span>
+                  <span className="text-primary-600">Rp {formatRupiah(order.final_amount)}</span>
+                </div>
               </div>
-            )}
-            {order.cashback_used > 0 && (
-              <div className="flex justify-between text-primary-600">
-                <span>Cashback:</span>
-                <span>- Rp {formatRupiah(order.cashback_used)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-xl font-bold text-gray-900 pt-3 border-t">
-              <span>Total:</span>
-              <span className="text-primary-600">Rp {formatRupiah(order.final_amount)}</span>
-            </div>
-          </div>
+            );
+          })()}
         </div>
 
         {order.statusLogs && order.statusLogs.length > 0 && (

@@ -21,6 +21,7 @@ const Checkout = () => {
   const [voucherError, setVoucherError] = useState('');
   const [cashbackBalance, setCashbackBalance] = useState(0);
   const [cashbackUsed, setCashbackUsed] = useState(0);
+  const [variantNotesByKey, setVariantNotesByKey] = useState({});
   const [formData, setFormData] = useState({
     reference: '',
     reference_detail: '',
@@ -126,17 +127,18 @@ const Checkout = () => {
 
   const calculateDiscount = () => {
     if (!voucher) return 0;
-    
+
     const subtotal = getCurrentSubtotal();
     if (subtotal < voucher.min_purchase) return 0;
 
     if (voucher.discount_type === 'percentage') {
-      const discount = subtotal * (voucher.discount_value / 100);
-      return voucher.max_discount > 0 
+      const discount = Math.round(subtotal * (voucher.discount_value / 100));
+      const capped = voucher.max_discount > 0
         ? Math.min(discount, voucher.max_discount)
         : discount;
+      return Math.min(subtotal, capped);
     } else {
-      return voucher.discount_value;
+      return Math.min(subtotal, Number(voucher.discount_value) || 0);
     }
   };
 
@@ -191,12 +193,14 @@ const Checkout = () => {
         ? [{
             product_id: directCheckout.product_id,
             variant_id: directCheckout.variant_id,
+            variant_notes: variantNotesByKey['direct-0']?.trim() || null,
             quantity: directCheckout.quantity,
             addon_ids: directCheckout.addon_ids
           }]
         : cart.map(item => ({
             product_id: item.product_id,
             variant_id: item.variant_id,
+            variant_notes: variantNotesByKey[item.id]?.trim() || null,
             quantity: item.quantity,
             addon_ids: item.addon_ids || null
           }));
@@ -560,6 +564,23 @@ const Checkout = () => {
                           <span className="text-right">{item.variant_name}</span>
                         </div>
                       )}
+                      <div className="pl-2 pt-1">
+                        <label className="block text-xs text-gray-600 mb-1">
+                          Catatan variasi:
+                        </label>
+                        <input
+                          type="text"
+                          value={variantNotesByKey[itemKey] || ''}
+                          onChange={(e) =>
+                            setVariantNotesByKey((prev) => ({
+                              ...prev,
+                              [itemKey]: e.target.value,
+                            }))
+                          }
+                          placeholder="Contoh: Sambal dipisah, tidak pedas..."
+                          className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
                       {directCheckout && directCheckout.addons && directCheckout.addons.length > 0 && (
                         <div className="flex justify-between text-xs sm:text-sm text-gray-600 pl-2">
                           <span>Add-on:</span>
@@ -715,12 +736,8 @@ const Checkout = () => {
                   <span className="font-medium text-sm sm:text-base">TRANSFER</span>
                   <p className="text-xs sm:text-sm text-gray-600 mt-1">Transfer ke:</p>
                   <p className="text-xs text-gray-500 mt-1 break-words">
-                    Shopee pay: 083841161663<br/>
-                    Dana: 083848099742<br/>
                     <span className="break-all">BRI: 3642-01-032854-53-5</span><br/>
-                    a/n Muhammad Al Hakim Pamungkas<br/>
-                    <span className="break-all">Seabank: 901677967857</span><br/>
-                    a/n Muhammad Al-Hakim Pamungkas
+                    a/n Muhammad Al Hakim Pamungkas
                   </p>
                   <p className="text-xs sm:text-sm text-gray-600 mt-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /> <span>Upload bukti transfer</span></p>
                   {formData.payment_method === 'transfer' && (
@@ -777,12 +794,8 @@ const Checkout = () => {
                   <span className="font-medium text-sm sm:text-base">DP</span>
                   <p className="text-xs sm:text-sm text-gray-600 mt-1">Transfer ke:</p>
                   <p className="text-xs text-gray-500 mt-1 break-words">
-                    Shopee pay: 083841161663<br/>
-                    Dana: 083848099742<br/>
                     <span className="break-all">BRI: 3642-01-032854-53-5</span><br/>
-                    a/n Muhammad Al Hakim Pamungkas<br/>
-                    <span className="break-all">Seabank: 901677967857</span><br/>
-                    a/n Muhammad Al-Hakim Pamungkas
+                    a/n Muhammad Al Hakim Pamungkas
                   </p>
                   <p className="text-xs sm:text-sm text-gray-600 mt-2 flex items-center gap-1 sm:gap-2 flex-wrap"><Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" /> <span>Upload bukti pembayaran</span></p>
                   {formData.payment_method === 'dp' && (

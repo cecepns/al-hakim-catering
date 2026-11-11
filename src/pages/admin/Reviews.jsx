@@ -1,16 +1,39 @@
 import { useEffect, useState } from 'react';
-import { orderAPI } from '../../utils/api';
+import { Link } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import { AlertTriangle, CheckCircle2, MessageSquareWarning } from 'lucide-react';
+import { orderAPI, orderIssuesAPI } from '../../utils/api';
 import { getImageUrl } from '../../utils/imageHelper';
+import { useAuth } from '../../context/AuthContext';
 import DashboardLayout from '../../components/DashboardLayout';
+import ImageViewer from '../../components/ImageViewer';
 
 const AdminReviews = () => {
+  const { user } = useAuth();
+  const role = user?.role === 'operasional' ? 'operasional' : 'admin';
+
+  const [activeTab, setActiveTab] = useState('feedback'); // 'feedback' | 'issues'
   const [reviews, setReviews] = useState([]);
+  const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [issuesLoading, setIssuesLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [issueFilter, setIssueFilter] = useState('all');
+
+  const [resolvingIssueId, setResolvingIssueId] = useState(null);
+  const [solutionDraft, setSolutionDraft] = useState('');
+  const [savingIssue, setSavingIssue] = useState(false);
+
+  const [viewerImage, setViewerImage] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   useEffect(() => {
     fetchReviews();
   }, [filter]);
+
+  useEffect(() => {
+    fetchIssues();
+  }, [issueFilter]);
 
   const fetchReviews = async () => {
     try {
@@ -20,23 +43,57 @@ const AdminReviews = () => {
       setReviews(response.data || []);
     } catch (error) {
       console.error('Error fetching reviews:', error);
-      // Set empty array if no reviews
       setReviews([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchIssues = async () => {
+    try {
+      setIssuesLoading(true);
+      const params = issueFilter !== 'all' ? { status: issueFilter } : {};
+      const response = await orderIssuesAPI.getAll(params);
+      setIssues(response.data || []);
+    } catch (error) {
+      console.error('Error fetching order issues:', error);
+      setIssues([]);
+    } finally {
+      setIssuesLoading(false);
+    }
+  };
+
   const handleResolve = async (review) => {
-    if (!window.confirm('Tandai sebagai telah ditangani?')) return;
+    if (!window.confirm('Tandai review/komplain ini sebagai telah ditangani?')) return;
 
     try {
       await orderAPI.resolveReview(review.id, review.type);
-      alert('Review berhasil ditandai sebagai selesai');
+      toast.success('Feedback berhasil ditandai sebagai selesai');
       fetchReviews();
     } catch (error) {
       console.error('Error resolving review:', error);
-      alert('Gagal menandai review');
+      toast.error('Gagal menandai feedback');
+    }
+  };
+
+  const startResolveIssue = (issue) => {
+    setResolvingIssueId(issue.id);
+    setSolutionDraft(issue.solution || '');
+  };
+
+  const handleResolveIssue = async (issueId) => {
+    try {
+      setSavingIssue(true);
+      await orderIssuesAPI.resolve(issueId, { solution: solutionDraft });
+      toast.success('Laporan kendala ditandai selesai');
+      setResolvingIssueId(null);
+      setSolutionDraft('');
+      fetchIssues();
+    } catch (error) {
+      console.error('Error resolving order issue:', error);
+      toast.error(error.response?.data?.message || 'Gagal menyelesaikan kendala');
+    } finally {
+      setSavingIssue(false);
     }
   };
 
@@ -44,9 +101,7 @@ const AdminReviews = () => {
     return Array.from({ length: 5 }, (_, i) => (
       <svg
         key={i}
-        className={`w-5 h-5 ${
-          i < rating ? 'text-yellow-400' : 'text-gray-300'
-        }`}
+        className={`w-5 h-5 ${i < rating ? 'text-yellow-400' : 'text-gray-300'}`}
         fill="currentColor"
         viewBox="0 0 20 20"
       >
@@ -69,141 +124,412 @@ const AdminReviews = () => {
     { value: 'complain', label: 'Komplain' },
   ];
 
+  const issueFilters = [
+    { value: 'all', label: 'Semua Kendala' },
+    { value: 'open', label: 'Belum Ditangani' },
+    { value: 'resolved', label: 'Selesai' },
+  ];
+
+  const openFeedbackCount = reviews.filter((r) => !r.resolved).length;
+  const openIssueCount = issues.filter((i) => i.status !== 'resolved').length;
+
   return (
-    <DashboardLayout role="admin">
+    <DashboardLayout role={role}>
       <div>
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Review & Komplain</h1>
-          <p className="text-gray-600 mt-1">Kelola feedback dari pelanggan</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Review, Komplain &amp; Laporan Kendala
+          </h1>
+          <p className="text-gray-600 mt-1">
+            Kelola review &amp; komplain pesanan serta tindak lanjuti kendala tim operasional, dapur, dan kurir
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <p className="text-sm text-gray-600">Total Review</p>
-            <p className="text-3xl font-bold text-gray-900 mt-2">
-              {reviews.filter((r) => r.type === 'review').length}
-            </p>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <p className="text-sm text-gray-600">Total Komplain</p>
-            <p className="text-3xl font-bold text-red-600 mt-2">
-              {reviews.filter((r) => r.type === 'complain').length}
-            </p>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <p className="text-sm text-gray-600">Belum Ditangani</p>
-            <p className="text-3xl font-bold text-yellow-600 mt-2">
-              {reviews.filter((r) => !r.resolved).length}
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex space-x-2 mb-6">
-            {filters.map((f) => (
-              <button
-                key={f.value}
-                onClick={() => setFilter(f.value)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  filter === f.value
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        {/* Top-level Tabs */}
+        <div className="flex flex-wrap gap-2 mb-6 border-b border-gray-200 pb-3">
+          <button
+            onClick={() => setActiveTab('feedback')}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition ${
+              activeTab === 'feedback'
+                ? 'bg-primary-600 text-white shadow'
+                : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <MessageSquareWarning className="w-4 h-4" />
+            Review &amp; Komplain
+            {openFeedbackCount > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === 'feedback'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-yellow-100 text-yellow-800'
                 }`}
               >
-                {f.label}
-              </button>
-            ))}
-          </div>
+                {openFeedbackCount}
+              </span>
+            )}
+          </button>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-            </div>
-          ) : reviews.length === 0 ? (
-            <div className="text-center py-12">
-              <svg
-                className="w-16 h-16 text-gray-400 mx-auto mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+          <button
+            onClick={() => setActiveTab('issues')}
+            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition ${
+              activeTab === 'issues'
+                ? 'bg-red-600 text-white shadow'
+                : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Laporan Kendala Pesanan
+            {openIssueCount > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === 'issues'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-red-100 text-red-700'
+                }`}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-                />
-              </svg>
-              <p className="text-gray-600">Belum ada review atau komplain</p>
+                {openIssueCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'feedback' ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Total Review</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">
+                  {reviews.filter((r) => r.type === 'review').length}
+                </p>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Total Komplain</p>
+                <p className="text-3xl font-bold text-red-600 mt-2">
+                  {reviews.filter((r) => r.type === 'complain').length}
+                </p>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Belum Ditangani</p>
+                <p className="text-3xl font-bold text-yellow-600 mt-2">
+                  {openFeedbackCount}
+                </p>
+              </div>
             </div>
-          ) : (
-            <div className="space-y-4">
-              {reviews.map((review) => (
-                <div
-                  key={review.id}
-                  className={`border rounded-xl p-6 ${
-                    review.resolved ? 'bg-gray-50' : 'bg-white'
-                  } hover:shadow-lg transition`}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center space-x-4">
-                      <div>
-                        <p className="font-semibold text-gray-900">{review.customer_name}</p>
-                        <p className="text-sm text-gray-600">
-                          Pesanan #{review.order_id} • {new Date(review.created_at).toLocaleDateString('id-ID')}
-                        </p>
+
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <div className="flex flex-wrap gap-2 mb-6">
+                {filters.map((f) => (
+                  <button
+                    key={f.value}
+                    onClick={() => setFilter(f.value)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                      filter === f.value
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+                </div>
+              ) : reviews.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg
+                    className="w-16 h-16 text-gray-400 mx-auto mb-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+                    />
+                  </svg>
+                  <p className="text-gray-600">Belum ada review atau komplain</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {reviews.map((review) => (
+                    <div
+                      key={`${review.type}-${review.id}`}
+                      className={`border rounded-xl p-6 ${
+                        review.resolved ? 'bg-gray-50' : 'bg-white'
+                      } hover:shadow-lg transition`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
+                        <div>
+                          <p className="font-semibold text-gray-900">{review.customer_name}</p>
+                          <p className="text-sm text-gray-600">
+                            <Link
+                              to={`/${role}/orders/${review.order_id}`}
+                              className="text-primary-600 hover:underline font-medium"
+                            >
+                              Pesanan #{review.order_id}
+                            </Link>{' '}
+                            • {new Date(review.created_at).toLocaleString('id-ID')}
+                          </p>
+                          {review.submitted_by_name && (
+                            <p className="text-xs text-purple-700 mt-0.5">
+                              Diinput oleh: {review.submitted_by_name}
+                              {review.submitted_by_role ? ` (${review.submitted_by_role})` : ''}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeColor(
+                              review.type
+                            )}`}
+                          >
+                            {review.type === 'review' ? 'Review' : 'Komplain'}
+                          </span>
+                          {review.resolved ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                              Selesai
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
+                              Belum Ditangani
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeColor(
-                          review.type
-                        )}`}
-                      >
-                        {review.type === 'review' ? 'Review' : 'Komplain'}
-                      </span>
-                      {review.resolved && (
-                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
-                          Selesai
-                        </span>
+
+                      {review.type === 'review' && review.rating && (
+                        <div className="flex items-center space-x-1 mb-3">
+                          {getRatingStars(review.rating)}
+                        </div>
+                      )}
+
+                      {review.type === 'complain' && review.subject && (
+                        <p className="text-sm font-semibold text-red-700 mb-1">
+                          {review.subject}
+                        </p>
+                      )}
+
+                      {review.comment ? (
+                        <p className="text-gray-700 mb-4 whitespace-pre-line">{review.comment}</p>
+                      ) : (
+                        <p className="text-xs italic text-gray-400 mb-4">(Tidak ada catatan teks)</p>
+                      )}
+
+                      {review.image_url && (
+                        <div className="mb-4">
+                          <img
+                            src={getImageUrl(review.image_url)}
+                            alt="Feedback"
+                            className="w-48 h-48 object-cover rounded-lg cursor-pointer border"
+                            onClick={() => {
+                              setViewerImage(getImageUrl(review.image_url));
+                              setViewerOpen(true);
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {!review.resolved && (
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => handleResolve(review)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
+                          >
+                            Tandai Selesai
+                          </button>
+                        </div>
                       )}
                     </div>
-                  </div>
-
-                  {review.type === 'review' && review.rating && (
-                    <div className="flex items-center space-x-1 mb-3">
-                      {getRatingStars(review.rating)}
-                    </div>
-                  )}
-
-                  <p className="text-gray-700 mb-4">{review.comment}</p>
-
-                  {review.image_url && (
-                    <div className="mb-4">
-                      <img
-                        src={getImageUrl(review.image_url)}
-                        alt="Review"
-                        className="w-48 h-48 object-cover rounded-lg cursor-pointer"
-                        onClick={() => window.open(getImageUrl(review.image_url), '_blank')}
-                      />
-                    </div>
-                  )}
-
-                  {!review.resolved && (
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => handleResolve(review)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
-                      >
-                        Tandai Selesai
-                      </button>
-                    </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Total Kendala Tercatat</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{issues.length}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Belum Ditangani</p>
+                <p className="text-3xl font-bold text-red-600 mt-2">{openIssueCount}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <p className="text-sm text-gray-600">Sudah Selesai</p>
+                <p className="text-3xl font-bold text-green-600 mt-2">
+                  {issues.filter((i) => i.status === 'resolved').length}
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <div className="flex flex-wrap gap-2 mb-6">
+                {issueFilters.map((f) => (
+                  <button
+                    key={f.value}
+                    onClick={() => setIssueFilter(f.value)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                      issueFilter === f.value
+                        ? 'bg-red-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {issuesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+                </div>
+              ) : issues.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <CheckCircle2 className="w-14 h-14 text-green-400 mx-auto mb-3" />
+                  <p>Tidak ada laporan kendala</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {issues.map((issue) => (
+                    <div
+                      key={issue.id}
+                      className={`border rounded-xl p-5 ${
+                        issue.status === 'resolved'
+                          ? 'bg-gray-50 border-gray-200'
+                          : 'bg-red-50/40 border-red-200'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-gray-900">
+                              {issue.issue_type}
+                            </span>
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                                issue.status === 'resolved'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {issue.status === 'resolved' ? 'Selesai' : 'Belum Ditangani'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">
+                            Pelanggan: <span className="font-medium">{issue.customer_name}</span> •{' '}
+                            <Link
+                              to={`/${role}/orders/${issue.order_id}`}
+                              className="text-primary-600 hover:underline font-medium"
+                            >
+                              Pesanan #{issue.order_id}
+                            </Link>{' '}
+                            • {new Date(issue.created_at).toLocaleString('id-ID')}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            Dilaporkan oleh:{' '}
+                            <span className="font-medium text-gray-700">
+                              {issue.reported_by_name || '-'}
+                            </span>{' '}
+                            ({issue.reported_role || '-'})
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm bg-white border border-gray-200 rounded-lg p-3 mb-3">
+                        <div>
+                          <span className="block text-xs font-semibold text-gray-500 uppercase">
+                            Penyebab
+                          </span>
+                          <p className="text-gray-800 mt-0.5 whitespace-pre-line">
+                            {issue.cause || '-'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="block text-xs font-semibold text-gray-500 uppercase">
+                            Tindak Lanjut
+                          </span>
+                          <p className="text-gray-800 mt-0.5 whitespace-pre-line">
+                            {issue.follow_up || '-'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="block text-xs font-semibold text-gray-500 uppercase">
+                            Solusi
+                          </span>
+                          <p className="text-gray-800 mt-0.5 whitespace-pre-line">
+                            {issue.solution || '-'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {issue.status === 'resolved' ? (
+                        issue.resolved_by_name && (
+                          <p className="text-xs text-green-700">
+                            Diselesaikan oleh {issue.resolved_by_name} pada{' '}
+                            {issue.resolved_at
+                              ? new Date(issue.resolved_at).toLocaleString('id-ID')
+                              : '-'}
+                          </p>
+                        )
+                      ) : resolvingIssueId === issue.id ? (
+                        <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                          <label className="block text-xs font-medium text-gray-700">
+                            Catatan Solusi Akhir (Opsional)
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={solutionDraft}
+                            onChange={(e) => setSolutionDraft(e.target.value)}
+                            placeholder="Tuliskan solusi penanganan kendala..."
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResolvingIssueId(null);
+                                setSolutionDraft('');
+                              }}
+                              className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 hover:bg-gray-50"
+                            >
+                              Batal
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingIssue}
+                              onClick={() => handleResolveIssue(issue.id)}
+                              className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 disabled:bg-gray-400"
+                            >
+                              {savingIssue ? 'Menyimpan...' : 'Simpan & Selesaikan'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => startResolveIssue(issue)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
+                          >
+                            Tandai Selesai
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         <div className="mt-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg">
           <div className="flex">
@@ -218,15 +544,24 @@ const AdminReviews = () => {
             </div>
             <div className="ml-3">
               <p className="text-sm text-blue-700">
-                Review dan komplain adalah feedback berharga dari pelanggan. Pastikan untuk menindaklanjuti setiap komplain dengan cepat.
+                Review, komplain, dan laporan kendala adalah masukan penting untuk menjaga kualitas layanan Al Hakim Catering. Pastikan setiap komplain dan kendala ditindaklanjuti sampai tuntas.
               </p>
             </div>
           </div>
         </div>
+
+        <ImageViewer
+          imageUrl={viewerImage}
+          isOpen={viewerOpen}
+          onClose={() => {
+            setViewerOpen(false);
+            setViewerImage(null);
+          }}
+          title="Foto Feedback"
+        />
       </div>
     </DashboardLayout>
   );
 };
 
 export default AdminReviews;
-

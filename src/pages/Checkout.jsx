@@ -37,6 +37,7 @@ const Checkout = () => {
     partner_business_name: '',
     partner_wa_number: '',
     notes: '',
+    variant_notes: '',
     verification: false,
     margin_amount: '', // For marketing users
   });
@@ -85,6 +86,23 @@ const Checkout = () => {
     }
   };
 
+  const getBaseTotal = () => {
+    if (!product) return 0;
+    if (directCheckout && directCheckout.total_price) {
+      const initQty = Number(directCheckout.quantity) || 1;
+      const unitDirect = directCheckout.total_price / initQty;
+      return Math.round(unitDirect * quantity);
+    }
+    const discountPct = Number(product.discount_percentage) || 0;
+    const rawUnit = Number(product.price) || 0;
+    const discUnit = Number(product.discounted_price) > 0
+      ? Number(product.discounted_price)
+      : discountPct > 0
+      ? Math.round(rawUnit * (1 - discountPct / 100))
+      : rawUnit;
+    return discUnit * quantity;
+  };
+
   const handleValidateVoucher = async () => {
     if (!voucherCode.trim()) {
       setVoucherError('Masukkan kode voucher');
@@ -94,15 +112,8 @@ const Checkout = () => {
     try {
       setVoucherError('');
       const response = await voucherAPI.validate(voucherCode);
-      
-      // Use directCheckout total_price if available (includes variant + addons), otherwise calculate from product price
-      let baseTotal;
-      if (directCheckout && directCheckout.total_price) {
-        baseTotal = directCheckout.total_price;
-      } else {
-        baseTotal = (product.discounted_price || product.price) * quantity;
-      }
-      
+      const baseTotal = getBaseTotal();
+
       if (baseTotal < response.data.min_purchase) {
         setVoucherError(`Minimal pembelian Rp ${formatRupiah(response.data.min_purchase)}`);
         return;
@@ -118,41 +129,27 @@ const Checkout = () => {
 
   const calculateDiscount = () => {
     if (!voucher || !product) return 0;
-    
-    // Use directCheckout total_price if available (includes variant + addons), otherwise calculate from product price
-    let baseTotal;
-    if (directCheckout && directCheckout.total_price) {
-      baseTotal = directCheckout.total_price;
-    } else {
-      baseTotal = (product.discounted_price || product.price) * quantity;
-    }
-    
+
+    const baseTotal = getBaseTotal();
     if (baseTotal < voucher.min_purchase) return 0;
 
     if (voucher.discount_type === 'percentage') {
-      const discount = baseTotal * (voucher.discount_value / 100);
-      return voucher.max_discount > 0 
+      const discount = Math.round(baseTotal * (voucher.discount_value / 100));
+      const capped = voucher.max_discount > 0
         ? Math.min(discount, voucher.max_discount)
         : discount;
+      return Math.min(baseTotal, capped);
     } else {
-      return voucher.discount_value;
+      return Math.min(baseTotal, Number(voucher.discount_value) || 0);
     }
   };
 
   const calculateTotal = () => {
     if (!product) return 0;
-    
-    // Use directCheckout total_price if available (includes variant + addons + quantity), otherwise calculate from product price
-    let baseTotal;
-    if (directCheckout && directCheckout.total_price) {
-      baseTotal = directCheckout.total_price;
-    } else {
-      const price = product.discounted_price || product.price;
-      baseTotal = price * quantity;
-    }
-    
+
+    const baseTotal = getBaseTotal();
     const discount = calculateDiscount();
-    const baseAmount = baseTotal - discount;
+    const baseAmount = Math.max(0, baseTotal - discount);
     const marginAmount = user?.role === 'marketing' ? (parseFloat(formData.margin_amount) || 0) : 0;
     return Math.max(0, baseAmount + marginAmount);
   };
@@ -192,6 +189,7 @@ const Checkout = () => {
       const items = [{
         product_id: product.id,
         variant_id: directCheckout?.variant_id || null,
+        variant_notes: formData.variant_notes?.trim() || null,
         quantity: quantity,
         addon_ids: (directCheckout?.addon_ids && Array.isArray(directCheckout.addon_ids) && directCheckout.addon_ids.length > 0) 
           ? directCheckout.addon_ids 
@@ -505,6 +503,18 @@ const Checkout = () => {
                   <span className="text-right">{directCheckout.variant_name}</span>
                 </div>
               )}
+              <div className="pt-1">
+                <label className="block text-xs text-gray-600 mb-1">
+                  Catatan variasi:
+                </label>
+                <input
+                  type="text"
+                  value={formData.variant_notes}
+                  onChange={(e) => handleInputChange('variant_notes', e.target.value)}
+                  placeholder="Contoh: Sambal dipisah, nasi hangat..."
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs sm:text-sm bg-white focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
               {directCheckout && directCheckout.addons && directCheckout.addons.length > 0 && (
                 <div className="flex justify-between text-xs sm:text-sm text-gray-600">
                   <span>Add-on:</span>
@@ -514,11 +524,7 @@ const Checkout = () => {
               <div className="flex justify-between text-xs sm:text-sm">
                 <span>Subtotal:</span>
                 <span className="font-medium">
-                  Rp {formatRupiah(
-                    directCheckout && directCheckout.total_price 
-                      ? directCheckout.total_price 
-                      : price * quantity
-                  )}
+                  Rp {formatRupiah(getBaseTotal())}
                 </span>
               </div>
 
@@ -609,10 +615,7 @@ const Checkout = () => {
                     <div className="mt-2 sm:mt-3 ml-6 sm:ml-7 p-3 sm:p-4 bg-gray-50 rounded-lg text-xs sm:text-sm">
                       <p className="font-medium mb-2">Transfer ke:</p>
                       <ul className="space-y-1 text-gray-700 break-words">
-                        <li>Shopee pay: 083841161663</li>
-                        <li>Dana: 083848099742</li>
                         <li className="break-words">BRI: 3642-01-032854-53-5 a/n Muhammad Al Hakim Pamungkas</li>
-                        <li className="break-words">Seabank: 901677967857 a/n Muhammad Al-Hakim Pamungkas</li>
                       </ul>
                     </div>
                   )}

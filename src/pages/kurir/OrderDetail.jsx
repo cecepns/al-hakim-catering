@@ -1,10 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderAPI } from '../../utils/api';
+import { orderAPI, orderIssuesAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
+import PackagingStandardsSection from '../../components/PackagingStandardsSection';
+import OrderDeliveryEquipmentSection from '../../components/OrderDeliveryEquipmentSection';
+import OrderIssuesListSection from '../../components/OrderIssuesListSection';
+import ReportIssueBox from '../../components/ReportIssueBox';
+import CompletionFeedbackBox from '../../components/CompletionFeedbackBox';
 
 const KurirOrderDetail = () => {
   const { id } = useParams();
@@ -21,95 +26,29 @@ const KurirOrderDetail = () => {
   const [proofDeliveryExisting, setProofDeliveryExisting] = useState(null);
   const [viewingImage, setViewingImage] = useState(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
-  const [checklist, setChecklist] = useState(null);
-  const [savingChecklist, setSavingChecklist] = useState(false);
 
-  const getDefaultChecklistStructure = () => {
-    return {
-      sections: [
-        {
-          id: 'section1',
-          title: 'PERSIAPAN SEBELUM BERANGKAT',
-          items: [
-            { id: 'item_1', text: 'Terima informasi pengiriman dari Tim dapur & admin operasional', checked: false },
-            { id: 'item_2', text: 'Cek alamat tujuan, waktu kirim, dan kontak penerima', checked: false },
-            { id: 'item_3', text: 'Pastikan jenis kendaraan sesuai jumlah & jenis barang', checked: false },
-            { id: 'item_4', text: 'Cek kebersihan kendaraan (bebas debu, bau, dan sisa makanan)', checked: false },
-            { id: 'item_5', text: 'Isi bahan bakar secukupnya untuk seluruh rute', checked: false },
-            { id: 'item_6', text: 'Siapkan alat bantu: keranjang, troli, dus besar, plastik pelindung dll', checked: false },
-            { id: 'item_7', text: 'Pastikan HP aktif, baterai penuh, dan ada paket data', checked: false },
-            { id: 'item_8', text: 'Gunakan seragam, dan perlengkapan kerja lengkap', checked: false }
-          ]
-        },
-        {
-          id: 'section2',
-          title: 'PERLENGKAPAN KEAMANAN & ANTISIPASI CUACA',
-          items: [
-            { id: 'item_1', text: 'Siapkan jas hujan / mantel (khusus pengiriman outdoor/motor)', checked: false },
-            { id: 'item_2', text: 'Siapkan plastik besar / terpal untuk menutup barang dari hujan', checked: false },
-            { id: 'item_3', text: 'Siapkan tali pengikat / pengaman untuk barang besar', checked: false },
-            { id: 'item_4', text: 'Pastikan helm & jaket safety dalam kondisi baik', checked: false },
-            { id: 'item_5', text: 'Cek ban, rem, dan lampu kendaraan sebelum jalan', checked: false }
-          ]
-        },
-        {
-          id: 'section3',
-          title: 'PENGECEKAN BARANG SEBELUM MUAT',
-          items: [
-            { id: 'item_1', text: 'Cocokkan jumlah barang dengan nota dapur / packing list', checked: false },
-            { id: 'item_2', text: 'Pastikan kemasan utuh, tidak bocor, tidak penyok', checked: false },
-            { id: 'item_3', text: 'Pisahkan menu panas, dingin, dan perlengkapan hajatan', checked: false },
-            { id: 'item_4', text: 'Packing/Lindungi makanan atau barang mudah rusak dengan plastik tambahan', checked: false },
-            { id: 'item_5', text: 'Pastikan semua barang sudah difoto sebelum dimuat / upload resi jika dikirim dengan expedisi', checked: false }
-          ]
-        },
-        {
-          id: 'section4',
-          title: 'PROSES PEMUATAN',
-          items: [
-            { id: 'item_1', text: 'Muat barang sesuai urutan pengantaran (rute jauh di belakang, dekat di depan)', checked: false },
-            { id: 'item_2', text: 'Gunakan alas bersih di dalam kendaraan', checked: false },
-            { id: 'item_3', text: 'Pastikan posisi stabil (tidak miring / mudah terguncang)', checked: false },
-            { id: 'item_4', text: 'Gunakan tali pengikat bila perlu', checked: false },
-            { id: 'item_5', text: 'Lindungi kemasan dengan plastik / terpal bila cuaca tidak menentu', checked: false }
-          ]
-        },
-        {
-          id: 'section5',
-          title: 'SELAMA PERJALANAN',
-          items: [
-            { id: 'item_1', text: 'Berkendara hati-hati dan stabil (hindari rem mendadak)', checked: false },
-            { id: 'item_2', text: 'Hindari rute bergelombang bila memungkinkan', checked: false },
-            { id: 'item_3', text: 'Update posisi ke admin bila pengiriman jauh atau terhambat hujan', checked: false },
-            { id: 'item_4', text: 'Pastikan suhu & kondisi barang aman selama perjalanan', checked: false },
-            { id: 'item_5', text: 'Berhenti sejenak bila hujan deras untuk melindungi barang', checked: false }
-          ]
-        },
-        {
-          id: 'section6',
-          title: 'SESAMPAINYA DI LOKASI / PELANGGAN',
-          items: [
-            { id: 'item_1', text: 'Cek kembali nama & alamat penerima', checked: false },
-            { id: 'item_2', text: 'Serahkan barang dengan sopan dan ramah', checked: false },
-            { id: 'item_3', text: 'Pastikan pelanggan menerima pesanan dalam kondisi baik', checked: false },
-            { id: 'item_4', text: 'Tunjukkan nota / bukti pengiriman', checked: false },
-            { id: 'item_5', text: 'Foto bukti serah terima (barang + lokasi/penerima)', checked: false },
-            { id: 'item_6', text: 'Catat jika ada komplain, kekurangan, atau kerusakan', checked: false }
-          ]
-        },
-        {
-          id: 'section7',
-          title: 'SETELAH PENGIRIMAN',
-          items: [
-            { id: 'item_1', text: 'Laporkan jika ada kendala pengiriman di lapangan', checked: false },
-            { id: 'item_2', text: 'Bersihkan kendaraan dari sisa barang atau kotoran', checked: false },
-            { id: 'item_3', text: 'Isi bahan bakar bila perlu untuk kesiapan berikutnya', checked: false },
-            { id: 'item_4', text: 'Cek kondisi perlengkapan (jas hujan, plastik, tali, alat bantu)', checked: false }
-          ]
-        }
-      ]
-    };
-  };
+  // States for Laporkan Kendala & Review/Komplin saat Selesai (Revisi 7)
+  const [hasIssue, setHasIssue] = useState(false);
+  const [issueData, setIssueData] = useState({
+    issue_type: '',
+    issue_cause: '',
+    issue_follow_up: '',
+    issue_solution: '',
+  });
+  const [feedbackData, setFeedbackData] = useState({
+    feedback_type: '',
+    feedback_rating: 5,
+    feedback_notes: '',
+    feedback_image: null,
+  });
+  const [standaloneIssueChecked, setStandaloneIssueChecked] = useState(false);
+  const [standaloneIssueData, setStandaloneIssueData] = useState({
+    issue_type: '',
+    issue_cause: '',
+    issue_follow_up: '',
+    issue_solution: '',
+  });
+  const [submittingIssue, setSubmittingIssue] = useState(false);
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -146,29 +85,9 @@ const KurirOrderDetail = () => {
     }
   }, [id]);
 
-  const fetchChecklist = useCallback(async () => {
-    try {
-      const response = await orderAPI.getKurirChecklist(id);
-      if (response.data.checklist_data) {
-        const checklistData = typeof response.data.checklist_data === 'string' 
-          ? JSON.parse(response.data.checklist_data) 
-          : response.data.checklist_data;
-        setChecklist(checklistData);
-      } else {
-        // Use default structure
-        setChecklist(response.data.checklist_data || getDefaultChecklistStructure());
-      }
-    } catch (error) {
-      console.error('Error fetching checklist:', error);
-      // Use default structure on error
-      setChecklist(getDefaultChecklistStructure());
-    }
-  }, [id]);
-
   useEffect(() => {
     fetchOrder();
-    fetchChecklist();
-  }, [fetchOrder, fetchChecklist]);
+  }, [fetchOrder]);
 
   const handleShippingFileChange = (e) => {
     const file = e.target.files[0];
@@ -194,52 +113,14 @@ const KurirOrderDetail = () => {
     }
   };
 
-  const handleChecklistChange = (sectionId, itemIndex) => {
-    if (!checklist) return;
-    
-    const updatedChecklist = {
-      ...checklist,
-      sections: checklist.sections.map(section => {
-        if (section.id === sectionId) {
-          return {
-            ...section,
-            items: section.items.map((item, idx) => 
-              idx === itemIndex ? { ...item, checked: !item.checked } : item
-            )
-          };
-        }
-        return section;
-      })
-    };
-    
-    setChecklist(updatedChecklist);
-  };
-
-  const isChecklistComplete = () => {
-    if (!checklist || !checklist.sections) return false;
-    return checklist.sections.every(section =>
-      section.items.every(item => item.checked)
-    );
-  };
-
-  const handleSaveChecklist = async () => {
-    if (!checklist) return;
-    
-    try {
-      setSavingChecklist(true);
-      await orderAPI.saveKurirChecklist(id, { checklist_data: checklist });
-      alert('Checklist berhasil disimpan');
-    } catch (error) {
-      console.error('Error saving checklist:', error);
-      alert('Gagal menyimpan checklist');
-    } finally {
-      setSavingChecklist(false);
-    }
-  };
-
   const handleStartShipping = async () => {
     if (!proofShippingFile) {
       alert('Upload bukti pengiriman terlebih dahulu');
+      return;
+    }
+
+    if (hasIssue && !issueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi jika Laporkan kendala dicentang');
       return;
     }
 
@@ -250,11 +131,21 @@ const KurirOrderDetail = () => {
       formData.append('notes', notes || 'Pesanan dalam pengiriman');
       formData.append('proof_shipping', proofShippingFile);
 
+      if (hasIssue) {
+        formData.append('has_issue', 'true');
+        formData.append('issue_type', issueData.issue_type.trim());
+        formData.append('issue_cause', issueData.issue_cause || '');
+        formData.append('issue_follow_up', issueData.issue_follow_up || '');
+        formData.append('issue_solution', issueData.issue_solution || '');
+      }
+
       await orderAPI.updateStatus(id, formData);
       alert('Status pesanan berhasil diupdate menjadi Dikirim');
       setNotes('');
       setProofShippingFile(null);
       setProofShippingPreview('');
+      setHasIssue(false);
+      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -297,6 +188,11 @@ const KurirOrderDetail = () => {
       return;
     }
 
+    if (hasIssue && !issueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi jika Laporkan kendala dicentang');
+      return;
+    }
+
     if (!window.confirm('Konfirmasi pesanan sudah diterima pelanggan?')) return;
 
     try {
@@ -306,7 +202,27 @@ const KurirOrderDetail = () => {
       formData.append('notes', 'Pesanan telah diterima pelanggan');
       formData.append('proof_delivery', proofDeliveryFile);
 
+      if (hasIssue) {
+        formData.append('has_issue', 'true');
+        formData.append('issue_type', issueData.issue_type.trim());
+        formData.append('issue_cause', issueData.issue_cause || '');
+        formData.append('issue_follow_up', issueData.issue_follow_up || '');
+        formData.append('issue_solution', issueData.issue_solution || '');
+      }
+
+      if (feedbackData.feedback_type) {
+        formData.append('feedback_type', feedbackData.feedback_type);
+        formData.append('feedback_rating', String(feedbackData.feedback_rating || 5));
+        formData.append('feedback_notes', feedbackData.feedback_notes || '');
+        if (feedbackData.feedback_image) {
+          formData.append('feedback_image', feedbackData.feedback_image);
+        }
+      }
+
       await orderAPI.updateStatus(id, formData);
+      setHasIssue(false);
+      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+      setFeedbackData({ feedback_type: '', feedback_rating: 5, feedback_notes: '', feedback_image: null });
       alert('Pesanan berhasil diselesaikan!');
       navigate('/kurir/dashboard');
     } catch (error) {
@@ -314,6 +230,31 @@ const KurirOrderDetail = () => {
       alert(error.response?.data?.message || 'Gagal menyelesaikan pesanan');
     } finally {
       setShipping(false);
+    }
+  };
+
+  const handleSubmitStandaloneIssue = async () => {
+    if (!standaloneIssueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi');
+      return;
+    }
+    try {
+      setSubmittingIssue(true);
+      await orderIssuesAPI.create(id, {
+        issue_type: standaloneIssueData.issue_type.trim(),
+        cause: standaloneIssueData.issue_cause || '',
+        follow_up: standaloneIssueData.issue_follow_up || '',
+        solution: standaloneIssueData.issue_solution || '',
+      });
+      alert('Kendala berhasil dilaporkan ke dashboard Admin & Operasional');
+      setStandaloneIssueChecked(false);
+      setStandaloneIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+      fetchOrder();
+    } catch (error) {
+      console.error('Error reporting standalone issue:', error);
+      alert(error.response?.data?.message || 'Gagal melaporkan kendala');
+    } finally {
+      setSubmittingIssue(false);
     }
   };
 
@@ -586,6 +527,11 @@ const KurirOrderDetail = () => {
                         {item.variant_name && (
                           <p className="text-sm text-gray-600">Varian: {item.variant_name}</p>
                         )}
+                        {item.variant_notes && (
+                          <p className="text-xs text-purple-800 bg-purple-50 px-2 py-0.5 rounded inline-block mt-1">
+                            Catatan variasi: {item.variant_notes}
+                          </p>
+                        )}
                         {addons.length > 0 && (
                           <div className="mt-1">
                             <p className="text-sm font-medium text-gray-700">Add-on:</p>
@@ -654,6 +600,15 @@ const KurirOrderDetail = () => {
                 </div>
               </div>
             )}
+
+            {/* Standar Pengemasan (Otomatis per Kategori) */}
+            <PackagingStandardsSection order={order} canEdit={false} />
+
+            {/* Checklist Perlengkapan Pengantaran (Kurir) */}
+            <OrderDeliveryEquipmentSection orderId={id} mode="kurir" />
+
+            {/* Daftar Kendala Pesanan */}
+            <OrderIssuesListSection issues={order.issues} canResolve={false} onResolved={fetchOrder} />
           </div>
 
           {/* Action Panel */}
@@ -696,6 +651,13 @@ const KurirOrderDetail = () => {
                       </div>
                     )}
                   </div>
+
+                  <ReportIssueBox
+                    checked={hasIssue}
+                    onCheckedChange={setHasIssue}
+                    values={issueData}
+                    onChange={setIssueData}
+                  />
 
                   <button
                     onClick={handleStartShipping}
@@ -818,6 +780,17 @@ const KurirOrderDetail = () => {
                       )}
                     </div>
 
+                    {/* Review atau Komplin saat Pesanan Selesai (Revisi 7 - Gambar 5) */}
+                    <CompletionFeedbackBox values={feedbackData} onChange={setFeedbackData} />
+
+                    {/* Laporkan Kendala */}
+                    <ReportIssueBox
+                      checked={hasIssue}
+                      onCheckedChange={setHasIssue}
+                      values={issueData}
+                      onChange={setIssueData}
+                    />
+
                     <button
                       onClick={handleDelivered}
                       disabled={!proofDeliveryFile || shipping}
@@ -830,67 +803,29 @@ const KurirOrderDetail = () => {
               </>
             )}
 
-            {/* Checklist Tim Kurir */}
-            {checklist && (
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">Checklist Tim Kurir / Pengiriman</h2>
-                  {isChecklistComplete() && (
-                    <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-semibold">
-                      ✓ Lengkap
-                    </span>
-                  )}
-                </div>
-                
-                <div className="space-y-6">
-                  {checklist.sections?.map((section, sectionIdx) => (
-                    <div key={section.id || sectionIdx} className="border rounded-lg p-4 bg-gray-50">
-                      <h3 className="font-semibold text-sm text-gray-900 mb-3 flex items-center">
-                        <span className="w-6 h-6 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center text-sm font-bold mr-2">
-                          {sectionIdx + 1}
-                        </span>
-                        {section.title}
-                      </h3>
-                      <div className="space-y-2">
-                        {section.items?.map((item, itemIdx) => (
-                          <label key={item.id || itemIdx} className="flex items-start space-x-3 cursor-pointer hover:bg-white p-2 rounded transition">
-                            <div className="flex items-center h-5">
-                              <input
-                                type="checkbox"
-                                checked={item.checked || false}
-                                onChange={() => handleChecklistChange(section.id, itemIdx)}
-                                className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                                disabled={savingChecklist}
-                              />
-                            </div>
-                            <div className="flex-1">
-                              <span className={`text-sm ${item.checked ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
-                                {item.text}
-                              </span>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex gap-3 mt-4">
-                  <button
-                    onClick={handleSaveChecklist}
-                    disabled={savingChecklist}
-                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-semibold transition text-sm"
-                  >
-                    {savingChecklist ? 'Menyimpan...' : 'Simpan Checklist'}
-                  </button>
-                  {isChecklistComplete() && (
-                    <div className="flex-1 bg-green-50 border border-green-200 rounded-lg flex items-center justify-center">
-                      <span className="text-green-700 text-sm font-semibold">✓ Siap Dikirim</span>
-                    </div>
-                  )}
-                </div>
+            {/* Standalone Laporkan Kendala (muncul kapan saja) */}
+            <div className="bg-white rounded-xl shadow-lg p-6 space-y-3">
+              <h2 className="text-lg font-semibold text-gray-900">Kendala Pengiriman</h2>
+              <p className="text-xs text-gray-500">
+                Laporkan kendala lapangan kapan saja (otomatis tercatat di Admin & Operasional).
+              </p>
+              <ReportIssueBox
+                checked={standaloneIssueChecked}
+                onCheckedChange={setStandaloneIssueChecked}
+                values={standaloneIssueData}
+                onChange={setStandaloneIssueData}
+              />
+              {standaloneIssueChecked && (
+                <button
+                  type="button"
+                  onClick={handleSubmitStandaloneIssue}
+                  disabled={submittingIssue || !standaloneIssueData.issue_type.trim()}
+                  className="w-full bg-amber-600 text-white px-4 py-2.5 rounded-lg hover:bg-amber-700 disabled:bg-gray-400 font-semibold text-sm transition"
+                >
+                  {submittingIssue ? 'Mengirim Laporan...' : 'Kirim Laporan Kendala'}
+                </button>
+              )}
             </div>
-            )}
           </div>
         </div>
       </div>

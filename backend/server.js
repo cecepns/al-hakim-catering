@@ -41,32 +41,229 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
-// Auto-check and add new columns if not present (Revision Nov 2026)
-async function ensureRevisionsSchema() {
+// Auto-check and add new columns/tables if not present (Revision Nov 2026)
+async function ensureColumnIfMissing(tableName, columnName, alterSql) {
   try {
-    const [colsPR] = await pool.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchase_requests' AND COLUMN_NAME = 'received_qty'`
+    const [cols] = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [tableName, columnName]
     );
-    if (colsPR.length === 0) {
-      await pool.query('ALTER TABLE `purchase_requests` ADD COLUMN `received_qty` DECIMAL(15,2) NULL AFTER `receipt_status`');
-      console.log('Added received_qty column to purchase_requests');
+    if (cols.length === 0) {
+      await pool.query(alterSql);
+      console.log(`Added ${columnName} column to ${tableName}`);
     }
   } catch (err) {
-    console.error('ensureRevisionsSchema purchase_requests error:', err.message);
+    console.error(`ensureColumnIfMissing ${tableName}.${columnName} error:`, err.message);
+  }
+}
+
+async function ensureRevisionsSchema() {
+  await ensureColumnIfMissing(
+    'purchase_requests',
+    'received_qty',
+    'ALTER TABLE `purchase_requests` ADD COLUMN `received_qty` DECIMAL(15,2) NULL AFTER `receipt_status`'
+  );
+  await ensureColumnIfMissing(
+    'inventory_opname',
+    'action',
+    'ALTER TABLE `inventory_opname` ADD COLUMN `action` TEXT NULL AFTER `notes`'
+  );
+
+  // Revision Phase 4: order_items discount & variant_notes
+  await ensureColumnIfMissing(
+    'order_items',
+    'original_price',
+    'ALTER TABLE `order_items` ADD COLUMN `original_price` DECIMAL(15,2) NULL AFTER `price`'
+  );
+  await ensureColumnIfMissing(
+    'order_items',
+    'discount_percentage',
+    'ALTER TABLE `order_items` ADD COLUMN `discount_percentage` INT NOT NULL DEFAULT 0 AFTER `original_price`'
+  );
+  await ensureColumnIfMissing(
+    'order_items',
+    'product_discount_amount',
+    'ALTER TABLE `order_items` ADD COLUMN `product_discount_amount` DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `discount_percentage`'
+  );
+  await ensureColumnIfMissing(
+    'order_items',
+    'variant_notes',
+    'ALTER TABLE `order_items` ADD COLUMN `variant_notes` TEXT NULL AFTER `variant_name`'
+  );
+
+  // Relax reviews & complaints for staff/order completion feedback
+  try {
+    await pool.query('ALTER TABLE `reviews` MODIFY COLUMN `rating` INT NULL');
+  } catch (err) {
+    console.error('ensureRevisionsSchema reviews.rating error:', err.message);
+  }
+  await ensureColumnIfMissing(
+    'reviews',
+    'submitted_by',
+    'ALTER TABLE `reviews` ADD COLUMN `submitted_by` INT NULL'
+  );
+  await ensureColumnIfMissing(
+    'reviews',
+    'submitted_by_role',
+    'ALTER TABLE `reviews` ADD COLUMN `submitted_by_role` VARCHAR(50) NULL'
+  );
+  try {
+    await pool.query('ALTER TABLE `complaints` MODIFY COLUMN `subject` VARCHAR(255) NULL');
+  } catch (err) {
+    console.error('ensureRevisionsSchema complaints.subject error:', err.message);
+  }
+  await ensureColumnIfMissing(
+    'complaints',
+    'submitted_by',
+    'ALTER TABLE `complaints` ADD COLUMN `submitted_by` INT NULL'
+  );
+  await ensureColumnIfMissing(
+    'complaints',
+    'submitted_by_role',
+    'ALTER TABLE `complaints` ADD COLUMN `submitted_by_role` VARCHAR(50) NULL'
+  );
+
+  // Packaging standards per category
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`packaging_standards\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`category\` VARCHAR(50) NOT NULL UNIQUE,
+        \`title\` VARCHAR(150) NOT NULL,
+        \`content\` TEXT NOT NULL,
+        \`updated_by\` INT NULL,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    const defaultPackaging = [
+      [
+        'catering',
+        'Standar Pengemasan Catering',
+        'Pastikan kemasan box/wadah catering dalam kondisi bersih, rapat, dan higienis. Tempelkan label menu/nama pemesan dengan jelas serta lengkapi sendok, tisu, dan saus sesuai porsi.'
+      ],
+      [
+        'aqiqah',
+        'Standar Pengemasan Aqiqah',
+        'Pastikan paket box aqiqah dilengkapi kartu ucapan/buku doa aqiqah, pisahkan bumbu/gulai/sate dalam wadah anti bocor, dan periksa kesesuaian porsi serta bonus paket.'
+      ],
+      [
+        'event',
+        'Standar Pengemasan Event & Prasmanan',
+        'Siapkan peralatan prasmanan (chafing dish, pemanas, capit, sendok saji) dalam kondisi bersih, bungkus makanan dengan pelindung higienis, dan catat perlengkapan pengantaran yang dibawa.'
+      ],
+      [
+        'store',
+        'Standar Pengemasan Store',
+        'Kemas produk store menggunakan dus/kemasan yang kokoh dan tersegel rapi, sertakan tanggal produksi serta informasi penyimpanan produk.'
+      ]
+    ];
+    for (const [cat, title, content] of defaultPackaging) {
+      await pool.query(
+        'INSERT IGNORE INTO `packaging_standards` (`category`, `title`, `content`) VALUES (?, ?, ?)',
+        [cat, title, content]
+      );
+    }
+  } catch (err) {
+    console.error('ensureRevisionsSchema packaging_standards error:', err.message);
   }
 
+  // Delivery equipment master & per-order tracking
   try {
-    const [colsIO] = await pool.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_opname' AND COLUMN_NAME = 'action'`
-    );
-    if (colsIO.length === 0) {
-      await pool.query('ALTER TABLE `inventory_opname` ADD COLUMN `action` TEXT NULL AFTER `notes`');
-      console.log('Added action column to inventory_opname');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`delivery_equipment_items\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`name\` VARCHAR(150) NOT NULL,
+        \`unit\` VARCHAR(50) NOT NULL DEFAULT 'Pcs',
+        \`stock\` INT NOT NULL DEFAULT 0,
+        \`description\` TEXT NULL,
+        \`is_active\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`order_delivery_equipment\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`order_id\` INT NOT NULL,
+        \`equipment_id\` INT NOT NULL,
+        \`qty_brought\` INT NOT NULL DEFAULT 0,
+        \`qty_returned\` INT NOT NULL DEFAULT 0,
+        \`qty_borrowed\` INT NOT NULL DEFAULT 0,
+        \`notes\` TEXT NULL,
+        \`recorded_by_dapur\` INT NULL,
+        \`checked_by_kurir\` INT NULL,
+        \`returned_at\` DATETIME NULL,
+        \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY \`uniq_order_equipment\` (\`order_id\`, \`equipment_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  } catch (err) {
+    console.error('ensureRevisionsSchema delivery_equipment error:', err.message);
+  }
+
+  // Order issues reporting table
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`order_issues\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`order_id\` INT NOT NULL,
+        \`reported_by\` INT NULL,
+        \`reported_role\` VARCHAR(50) NULL,
+        \`issue_type\` VARCHAR(255) NOT NULL,
+        \`cause\` TEXT NULL,
+        \`follow_up\` TEXT NULL,
+        \`solution\` TEXT NULL,
+        \`status\` ENUM('open', 'resolved') NOT NULL DEFAULT 'open',
+        \`resolved_by\` INT NULL,
+        \`resolved_at\` DATETIME NULL,
+        \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  } catch (err) {
+    console.error('ensureRevisionsSchema order_issues error:', err.message);
+  }
+
+  // Checklist templates & daily role checklists
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`checklist_templates\` (
+        \`role\` VARCHAR(50) PRIMARY KEY,
+        \`template_data\` LONGTEXT NOT NULL,
+        \`updated_by\` INT NULL,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`daily_role_checklists\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`role\` VARCHAR(50) NOT NULL,
+        \`checklist_date\` DATE NOT NULL,
+        \`user_id\` INT NOT NULL,
+        \`checklist_data\` LONGTEXT NOT NULL,
+        \`notes\` TEXT NULL,
+        \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY \`uniq_role_date_user\` (\`role\`, \`checklist_date\`, \`user_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    const seedTemplates = [
+      ['admin', getDefaultAdminChecklist()],
+      ['operasional', getDefaultOperasionalChecklist()],
+      ['dapur', getDefaultChecklist()],
+      ['kurir', getDefaultKurirChecklist()]
+    ];
+    for (const [roleName, tpl] of seedTemplates) {
+      await pool.query(
+        'INSERT IGNORE INTO `checklist_templates` (`role`, `template_data`) VALUES (?, ?)',
+        [roleName, JSON.stringify(tpl)]
+      );
     }
   } catch (err) {
-    console.error('ensureRevisionsSchema inventory_opname error:', err.message);
+    console.error('ensureRevisionsSchema checklist_templates error:', err.message);
   }
 }
 ensureRevisionsSchema();
@@ -1063,10 +1260,13 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
         COALESCE(o.guest_customer_name, u.name) as customer_name, 
         u.email as customer_email, 
         COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+        v.code as voucher_code,
+        v.name as voucher_name,
         c.commission_amount,
         c.status as commission_status
        FROM orders o
        JOIN users u ON o.user_id = u.id
+       LEFT JOIN vouchers v ON o.voucher_id = v.id
        LEFT JOIN commissions c ON o.id = c.order_id
        WHERE o.id = ?`,
       [req.params.id]
@@ -1077,7 +1277,10 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
     }
 
     const [items] = await pool.query(
-      'SELECT * FROM order_items WHERE order_id = ?',
+      `SELECT oi.*, p.category as product_category
+       FROM order_items oi
+       LEFT JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id = ?`,
       [req.params.id]
     );
 
@@ -1086,10 +1289,27 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
       [req.params.id]
     );
 
+    let issues = [];
+    try {
+      const [issueRows] = await pool.query(
+        `SELECT oi.*, u.name as reported_by_name, ru.name as resolved_by_name
+         FROM order_issues oi
+         LEFT JOIN users u ON oi.reported_by = u.id
+         LEFT JOIN users ru ON oi.resolved_by = ru.id
+         WHERE oi.order_id = ?
+         ORDER BY oi.created_at DESC`,
+        [req.params.id]
+      );
+      issues = issueRows;
+    } catch (e) {
+      // Ignore if table not initialized yet
+    }
+
     res.json({
       ...orders[0],
       items,
-      statusLogs
+      statusLogs,
+      issues
     });
   } catch (error) {
     console.error('Get order error:', error);
@@ -1138,6 +1358,9 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
     } catch (e) {
       console.error('Error parsing delivery_notes:', e);
     }
+    if (req.body.payment_amount && !guestData.payment_amount) {
+      guestData.payment_amount = req.body.payment_amount;
+    }
 
     // Payment amount and marketing partner info: will be extracted and stored in separate columns
     // Also kept in delivery_notes JSON for backward compatibility
@@ -1181,13 +1404,14 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         throw new Error(`Stok produk "${product.name}" tidak mencukupi. Stok tersedia: ${product.stock}`);
       }
 
-      // Ensure price is a valid number
-      let price = parseFloat(product.discounted_price) || parseFloat(product.price) || 0;
-      if (isNaN(price) || price < 0) {
-        price = 0;
+      // Compute raw base unit price (variant overrides base product price)
+      let rawBaseUnit = parseFloat(product.price) || 0;
+      if (isNaN(rawBaseUnit) || rawBaseUnit < 0) {
+        rawBaseUnit = 0;
       }
 
       let variant_name = null;
+      let variantSelected = false;
 
       // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
@@ -1199,10 +1423,24 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         if (isNaN(variantPrice) || variantPrice < 0) {
           throw new Error(`Harga varian untuk produk "${product.name}" tidak valid`);
         }
-        // Use variant price as the full price, not added to base price
-        price = variantPrice;
+        rawBaseUnit = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
+        variantSelected = true;
       }
+
+      // Apply product discount_percentage cleanly to both variant and non-variant prices
+      const discountPct = Number(product.discount_percentage) || 0;
+      let discountedBaseUnit = rawBaseUnit;
+      if (discountPct > 0) {
+        discountedBaseUnit = Math.round(rawBaseUnit * (1 - discountPct / 100));
+      } else if (!variantSelected && product.discounted_price != null && product.discounted_price !== '') {
+        const dbDisc = parseFloat(product.discounted_price);
+        if (!isNaN(dbDisc) && dbDisc >= 0) {
+          discountedBaseUnit = dbDisc;
+        }
+      }
+      const price = discountedBaseUnit;
+      const unitDiscountAmount = Math.max(0, rawBaseUnit - discountedBaseUnit);
 
       // Process addons if provided
       let addonTotal = 0;
@@ -1227,6 +1465,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
       // Calculate subtotal: (base_price + addon_total) * quantity
       const basePriceWithAddons = price + addonTotal;
+      const originalPriceWithAddons = rawBaseUnit + addonTotal;
       const subtotal = basePriceWithAddons * item.quantity;
 
       // Ensure subtotal is a valid number
@@ -1238,8 +1477,12 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
         variant_id: item.variant_id || null,
         product_name: product.name,
         variant_name: variant_name,
+        variant_notes: item.variant_notes || null,
         quantity: item.quantity,
-        price: basePriceWithAddons, // Price includes addons
+        price: basePriceWithAddons, // Price includes addons after product discount
+        original_price: originalPriceWithAddons,
+        discount_percentage: discountPct,
+        product_discount_amount: unitDiscountAmount * item.quantity,
         subtotal: validSubtotal,
         addons_json: addonsData.length > 0 ? JSON.stringify(addonsData) : null,
         addons_price: addonTotal
@@ -1252,7 +1495,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     if (voucher_code) {
       const [vouchers] = await connection.query(
-        'SELECT * FROM vouchers WHERE code = ? AND is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()',
+        'SELECT * FROM vouchers WHERE TRIM(UPPER(code)) = TRIM(UPPER(?)) AND is_active = TRUE AND DATE(valid_from) <= CURDATE() AND (valid_until >= NOW() OR DATE(valid_until) >= CURDATE())',
         [voucher_code]
       );
 
@@ -1261,13 +1504,14 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
         if (total_amount >= voucher.min_purchase && voucher.used_count < voucher.quota) {
           if (voucher.discount_type === 'percentage') {
-            discount_amount = total_amount * (voucher.discount_value / 100);
+            discount_amount = Math.round(total_amount * (voucher.discount_value / 100));
             if (voucher.max_discount > 0 && discount_amount > voucher.max_discount) {
               discount_amount = voucher.max_discount;
             }
           } else {
             discount_amount = voucher.discount_value;
           }
+          discount_amount = Math.min(total_amount, Number(discount_amount) || 0);
 
           voucher_id = voucher.id;
 
@@ -1285,7 +1529,7 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
     margin_amount = isNaN(margin_amount) ? 0 : parseFloat(margin_amount) || 0;
 
     // Calculate base_amount (before margin) and final_amount (with margin)
-    const base_amount = total_amount - discount_amount;
+    const base_amount = Math.max(0, total_amount - discount_amount);
     const final_amount = Math.max(0, base_amount + margin_amount);
 
     // Final validation to ensure no NaN values
@@ -1319,15 +1563,15 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     const [orderResult] = await connection.query(
       `INSERT INTO orders (
-        user_id, voucher_id, total_amount, discount_amount, cashback_used, final_amount, 
+        user_id, voucher_id, total_amount, base_amount, discount_amount, cashback_used, final_amount, margin_amount,
         payment_method, payment_amount, delivery_address, delivery_notes,
         guest_customer_name, guest_wa_number_1, guest_wa_number_2,
         guest_reference, guest_reference_detail, partner_business_name, partner_wa_number,
         guest_event_name, guest_event_date, guest_event_time,
         guest_sharelok_link, guest_landmark, guest_delivery_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        guestUserId, voucher_id, total_amount, discount_amount, 0, final_amount,
+        guestUserId, voucher_id, total_amount, base_amount, discount_amount, 0, final_amount, margin_amount,
         payment_method, payment_amount, delivery_address, delivery_notes,
         guestData.customer_name || null,
         guestData.wa_number_1 || null,
@@ -1349,8 +1593,23 @@ app.post('/api/orders/guest', upload.single('payment_proof'), async (req, res) =
 
     for (const item of orderItems) {
       await connection.query(
-        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal, item.addons_json, item.addons_price || 0]
+        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, variant_notes, quantity, price, original_price, discount_percentage, product_discount_amount, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          orderId,
+          item.product_id,
+          item.variant_id,
+          item.product_name,
+          item.variant_name,
+          item.variant_notes || null,
+          item.quantity,
+          item.price,
+          item.original_price,
+          item.discount_percentage,
+          item.product_discount_amount,
+          item.subtotal,
+          item.addons_json,
+          item.addons_price || 0
+        ]
       );
 
       await connection.query(
@@ -1475,12 +1734,12 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       const product = products[0];
 
       // Safely parse numeric fields from database to avoid NaN issues
-      const rawPrice = product.discounted_price != null && product.discounted_price !== ''
-        ? product.discounted_price
-        : product.price;
-      let price = Number(rawPrice);
+      let rawBaseUnit = Number(product.price);
+      if (!Number.isFinite(rawBaseUnit) || rawBaseUnit < 0) {
+        rawBaseUnit = Number(product.discounted_price || 0);
+      }
 
-      if (!Number.isFinite(price)) {
+      if (!Number.isFinite(rawBaseUnit)) {
         throw new Error(`Harga produk "${product.name}" tidak valid`);
       }
 
@@ -1498,6 +1757,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
       }
 
       let variant_name = null;
+      let variantSelected = false;
 
       // Use variant price_adjustment as FULL price (not an adjustment) if variant is selected
       if (item.variant_id) {
@@ -1509,10 +1769,24 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         if (!Number.isFinite(variantPrice) || variantPrice < 0) {
           throw new Error(`Harga varian untuk produk "${product.name}" tidak valid`);
         }
-        // Use variant price as the full price, not added to base price
-        price = variantPrice;
+        rawBaseUnit = variantPrice;
         variant_name = variants[0].name; // Get variant name from database
+        variantSelected = true;
       }
+
+      // Apply product discount_percentage cleanly to both variant and non-variant prices
+      const discountPct = Number(product.discount_percentage) || 0;
+      let discountedBaseUnit = rawBaseUnit;
+      if (discountPct > 0) {
+        discountedBaseUnit = Math.round(rawBaseUnit * (1 - discountPct / 100));
+      } else if (!variantSelected && product.discounted_price != null && product.discounted_price !== '') {
+        const dbDisc = Number(product.discounted_price);
+        if (Number.isFinite(dbDisc) && dbDisc >= 0) {
+          discountedBaseUnit = dbDisc;
+        }
+      }
+      const price = discountedBaseUnit;
+      const unitDiscountAmount = Math.max(0, rawBaseUnit - discountedBaseUnit);
 
       // Process addons if provided
       let addonTotal = 0;
@@ -1539,6 +1813,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
       // Calculate subtotal: (base_price + addon_total) * quantity
       const basePriceWithAddons = price + addonTotal;
+      const originalPriceWithAddons = rawBaseUnit + addonTotal;
       const subtotal = basePriceWithAddons * item.quantity;
 
       // Ensure subtotal is a valid number
@@ -1551,8 +1826,12 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
         variant_id: item.variant_id || null,
         product_name: product.name,
         variant_name: variant_name,
+        variant_notes: item.variant_notes || null,
         quantity: item.quantity,
-        price: basePriceWithAddons, // Price includes addons
+        price: basePriceWithAddons, // Price includes addons after product discount
+        original_price: originalPriceWithAddons,
+        discount_percentage: discountPct,
+        product_discount_amount: unitDiscountAmount * item.quantity,
         subtotal: validSubtotal,
         addons_json: addonsData.length > 0 ? JSON.stringify(addonsData) : null,
         addons_price: addonTotal
@@ -1564,7 +1843,7 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     if (voucher_code) {
       const [vouchers] = await connection.query(
-        'SELECT * FROM vouchers WHERE code = ? AND is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()',
+        'SELECT * FROM vouchers WHERE TRIM(UPPER(code)) = TRIM(UPPER(?)) AND is_active = TRUE AND DATE(valid_from) <= CURDATE() AND (valid_until >= NOW() OR DATE(valid_until) >= CURDATE())',
         [voucher_code]
       );
 
@@ -1573,13 +1852,14 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
         if (total_amount >= voucher.min_purchase && voucher.used_count < voucher.quota) {
           if (voucher.discount_type === 'percentage') {
-            discount_amount = total_amount * (voucher.discount_value / 100);
+            discount_amount = Math.round(total_amount * (voucher.discount_value / 100));
             if (voucher.max_discount > 0 && discount_amount > voucher.max_discount) {
               discount_amount = voucher.max_discount;
             }
           } else {
             discount_amount = voucher.discount_value;
           }
+          discount_amount = Math.min(total_amount, Number(discount_amount) || 0);
 
           voucher_id = voucher.id;
 
@@ -1685,8 +1965,23 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 
     for (const item of orderItems) {
       await connection.query(
-        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, quantity, price, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderId, item.product_id, item.variant_id, item.product_name, item.variant_name, item.quantity, item.price, item.subtotal, item.addons_json, item.addons_price || 0]
+        'INSERT INTO order_items (order_id, product_id, variant_id, product_name, variant_name, variant_notes, quantity, price, original_price, discount_percentage, product_discount_amount, subtotal, addons_json, addons_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          orderId,
+          item.product_id,
+          item.variant_id,
+          item.product_name,
+          item.variant_name,
+          item.variant_notes || null,
+          item.quantity,
+          item.price,
+          item.original_price,
+          item.discount_percentage,
+          item.product_discount_amount,
+          item.subtotal,
+          item.addons_json,
+          item.addons_price || 0
+        ]
       );
 
       await connection.query(
@@ -1786,7 +2081,8 @@ app.post('/api/orders', authenticateToken, upload.single('payment_proof'), async
 app.put('/api/orders/:id/status', authenticateToken, upload.fields([
   { name: 'proof', maxCount: 1 },
   { name: 'proof_shipping', maxCount: 1 },
-  { name: 'proof_delivery', maxCount: 1 }
+  { name: 'proof_delivery', maxCount: 1 },
+  { name: 'feedback_image', maxCount: 1 }
 ]), async (req, res) => {
   try {
     const { status, notes } = req.body;
@@ -1806,10 +2102,15 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       proof_image_url = `/uploads/${req.files.proof_delivery[0].filename}`;
     }
 
-    // Get current order status before update
-    const [currentOrders] = await pool.query('SELECT status, final_amount FROM orders WHERE id = ?', [req.params.id]);
+    let feedback_image_url = null;
+    if (req.files && req.files.feedback_image && req.files.feedback_image[0]) {
+      feedback_image_url = `/uploads/${req.files.feedback_image[0].filename}`;
+    }
+
+    // Get current order info before update
+    const [currentOrders] = await pool.query('SELECT user_id, status, final_amount FROM orders WHERE id = ?', [req.params.id]);
     const currentStatus = currentOrders.length > 0 ? currentOrders[0].status : null;
-    const orderAmount = currentOrders.length > 0 ? currentOrders[0].final_amount : 0;
+    const orderUserId = currentOrders.length > 0 ? currentOrders[0].user_id : req.user.id;
 
     await pool.query('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
 
@@ -1820,6 +2121,62 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes, proof_image_url) VALUES (?, ?, ?, ?, ?, ?)',
       [req.params.id, status, req.user.id, handlerName, notes, proof_image_url]
     );
+
+    // Simpan laporan kendala jika dicentang (Revisi 7)
+    const hasIssue = req.body.has_issue === 'true' || req.body.has_issue === true || req.body.has_issue === '1';
+    if (hasIssue && req.body.issue_type && String(req.body.issue_type).trim()) {
+      try {
+        await pool.query(
+          `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+          [
+            req.params.id,
+            req.user.id,
+            req.user.role,
+            String(req.body.issue_type).trim(),
+            req.body.issue_cause || null,
+            req.body.issue_follow_up || null,
+            req.body.issue_solution || null
+          ]
+        );
+      } catch (issueErr) {
+        console.error('Error recording order issue on status update:', issueErr);
+      }
+    }
+
+    // Simpan Review / Komplin saat pesanan selesai (Revisi 7)
+    const feedbackType = (req.body.feedback_type || '').toLowerCase();
+    const feedbackNotes = req.body.feedback_notes || '';
+    if (feedbackType === 'review') {
+      try {
+        const parsedRating = parseInt(req.body.feedback_rating, 10);
+        const ratingVal = (!Number.isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5) ? parsedRating : 5;
+        await pool.query(
+          'INSERT INTO reviews (order_id, user_id, rating, comment, image_url, resolved, submitted_by, submitted_by_role) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+          [req.params.id, orderUserId, ratingVal, feedbackNotes, feedback_image_url, req.user.id, req.user.role]
+        );
+      } catch (revErr) {
+        console.error('Error recording completion review:', revErr);
+      }
+    } else if (feedbackType === 'complain') {
+      try {
+        await pool.query(
+          'INSERT INTO complaints (order_id, user_id, subject, description, image_url, status, submitted_by, submitted_by_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            req.params.id,
+            orderUserId,
+            req.body.feedback_subject || `Komplin Pesanan #${req.params.id}`,
+            feedbackNotes,
+            feedback_image_url,
+            'open',
+            req.user.id,
+            req.user.role
+          ]
+        );
+      } catch (compErr) {
+        console.error('Error recording completion complaint:', compErr);
+      }
+    }
 
     // Update commission status to 'completed' when order is completed
     if (status === 'selesai' && currentStatus !== 'selesai') {
@@ -1988,8 +2345,8 @@ app.post('/api/orders/:id/review', authenticateToken, upload.single('image'), as
   }
 });
 
-// Get all reviews and complaints for admin
-app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, res) => {
+// Get all reviews and complaints for admin & operasional
+app.get('/api/reviews', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
   try {
     const { type, status } = req.query;
 
@@ -1999,10 +2356,15 @@ app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, r
     // Get reviews
     if (!type || type === 'all' || type === 'review') {
       const [reviewResults] = await pool.query(
-        `SELECT r.*, u.name as customer_name, u.email as customer_email, o.id as order_id
+        `SELECT r.*,
+                COALESCE(o.guest_customer_name, u.name) as customer_name,
+                u.email as customer_email,
+                COALESCE(sb.name, '') as submitted_by_name,
+                o.id as order_id
          FROM reviews r
          JOIN users u ON r.user_id = u.id
          JOIN orders o ON r.order_id = o.id
+         LEFT JOIN users sb ON r.submitted_by = sb.id
          ORDER BY r.created_at DESC`
       );
       reviews = reviewResults.map(r => ({
@@ -2015,10 +2377,15 @@ app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, r
     // Get complaints
     if (!type || type === 'all' || type === 'complain') {
       const [complaintResults] = await pool.query(
-        `SELECT c.*, u.name as customer_name, u.email as customer_email, o.id as order_id
+        `SELECT c.*,
+                COALESCE(o.guest_customer_name, u.name) as customer_name,
+                u.email as customer_email,
+                COALESCE(sb.name, '') as submitted_by_name,
+                o.id as order_id
          FROM complaints c
          JOIN users u ON c.user_id = u.id
          JOIN orders o ON c.order_id = o.id
+         LEFT JOIN users sb ON c.submitted_by = sb.id
          ORDER BY c.created_at DESC`
       );
       complaints = complaintResults.map(c => ({
@@ -2030,8 +2397,10 @@ app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, r
       }));
     }
 
-    // Combine and filter
-    let combined = [...reviews, ...complaints];
+    // Combine, sort by newest, and filter
+    let combined = [...reviews, ...complaints].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
 
     if (status === 'resolved') {
       combined = combined.filter(r => r.resolved === 1);
@@ -2047,7 +2416,7 @@ app.get('/api/reviews', authenticateToken, authorizeRole('admin'), async (req, r
 });
 
 // Resolve review or complaint
-app.put('/api/reviews/:id/resolve', authenticateToken, authorizeRole('admin'), async (req, res) => {
+app.put('/api/reviews/:id/resolve', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
   try {
     const { type } = req.body; // 'review' or 'complain'
 
@@ -2067,6 +2436,51 @@ app.put('/api/reviews/:id/resolve', authenticateToken, authorizeRole('admin'), a
   } catch (error) {
     console.error('Resolve review error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+// Submit Review or Complain from Staff / Order Completion Flow (Revisi 7)
+app.post('/api/orders/:id/feedback', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const { type, comment, rating, subject } = req.body;
+    const image_url = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const [orders] = await pool.query('SELECT id, user_id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    const orderUserId = orders[0].user_id;
+    const normalizedType = (type || 'review').toLowerCase();
+
+    if (normalizedType === 'complain') {
+      await pool.query(
+        'INSERT INTO complaints (order_id, user_id, subject, description, image_url, status, submitted_by, submitted_by_role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          orderId,
+          orderUserId,
+          subject || `Komplin Pesanan #${orderId}`,
+          comment || '',
+          image_url,
+          'open',
+          req.user.id,
+          req.user.role
+        ]
+      );
+    } else {
+      const parsedRating = parseInt(rating, 10);
+      const ratingVal = (!Number.isNaN(parsedRating) && parsedRating >= 1 && parsedRating <= 5) ? parsedRating : 5;
+      await pool.query(
+        'INSERT INTO reviews (order_id, user_id, rating, comment, image_url, resolved, submitted_by, submitted_by_role) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+        [orderId, orderUserId, ratingVal, comment || '', image_url, req.user.id, req.user.role]
+      );
+    }
+
+    res.status(201).json({ message: 'Feedback review/komplin berhasil disimpan' });
+  } catch (error) {
+    console.error('Add order feedback error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan feedback' });
   }
 });
 
@@ -2417,7 +2831,7 @@ app.get('/api/vouchers', async (req, res) => {
       query = 'SELECT * FROM vouchers ORDER BY created_at DESC';
     } else {
       // Regular users only see active and valid vouchers
-      query = 'SELECT * FROM vouchers WHERE is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()';
+      query = 'SELECT * FROM vouchers WHERE is_active = TRUE AND DATE(valid_from) <= CURDATE() AND (valid_until >= NOW() OR DATE(valid_until) >= CURDATE())';
     }
 
     const [vouchers] = await pool.query(query);
@@ -2433,8 +2847,8 @@ app.post('/api/vouchers/validate', async (req, res) => {
     const { code } = req.body;
 
     const [vouchers] = await pool.query(
-      'SELECT * FROM vouchers WHERE code = ? AND is_active = TRUE AND valid_from <= NOW() AND valid_until >= NOW()',
-      [code]
+      'SELECT * FROM vouchers WHERE TRIM(UPPER(code)) = TRIM(UPPER(?)) AND is_active = TRUE AND DATE(valid_from) <= CURDATE() AND (valid_until >= NOW() OR DATE(valid_until) >= CURDATE())',
+      [code || '']
     );
 
     if (vouchers.length === 0) {
@@ -3308,6 +3722,7 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
       `SELECT c.*, 
               p.name, 
               p.price, 
+              p.discount_percentage,
               p.discounted_price, 
               COALESCE(
                 (SELECT image_url FROM product_variant_images WHERE variant_id = c.variant_id AND is_primary = 1 LIMIT 1),
@@ -3315,7 +3730,8 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
                 (SELECT media_url FROM product_images WHERE product_id = c.product_id ORDER BY display_order LIMIT 1),
                 p.image_url
               ) as image_url,
-              pv.name as variant_name, 
+              pv.name as variant_name,
+              pv.price_adjustment as variant_price,
               (SELECT image_url FROM product_variant_images WHERE variant_id = c.variant_id AND is_primary = 1 LIMIT 1) as variant_image_url
        FROM cart c
        JOIN products p ON c.product_id = p.id
@@ -3337,11 +3753,17 @@ app.get('/api/cart', authenticateToken, async (req, res) => {
         }
       }
 
-      // If total_price is null, calculate it from product price
+      // If total_price is null, calculate it from variant/product price with discount_percentage
       let finalPrice = item.total_price;
       if (!finalPrice) {
-        const basePrice = parseFloat(item.discounted_price || item.price || 0);
-        finalPrice = basePrice * item.quantity;
+        const discountPct = Number(item.discount_percentage) || 0;
+        const rawUnit = item.variant_id && item.variant_price != null
+          ? parseFloat(item.variant_price || 0)
+          : parseFloat(item.price || 0);
+        const unitAfterDiscount = discountPct > 0
+          ? Math.round(rawUnit * (1 - discountPct / 100))
+          : parseFloat(item.discounted_price || rawUnit || 0);
+        finalPrice = unitAfterDiscount * item.quantity;
       }
 
       return {
@@ -3691,17 +4113,28 @@ app.put('/api/users/:id/toggle-active', authenticateToken, authorizeRole('admin'
 // ========================================
 app.get('/api/orders/:id/kurir-checklist', authenticateToken, async (req, res) => {
   try {
+    const { template, updatedAt } = await getChecklistTemplateWithMeta('kurir');
     const [checklists] = await pool.query(
       'SELECT * FROM kurir_checklists WHERE order_id = ? ORDER BY created_at DESC LIMIT 1',
       [req.params.id]
     );
 
     if (checklists.length === 0) {
-      // Return default empty checklist if none exists
-      return res.json({ checklist_data: getDefaultKurirChecklist(), order_id: req.params.id });
+      return res.json({ checklist_data: template, order_id: req.params.id });
     }
 
-    res.json(checklists[0]);
+    let checklistData = checklists[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+    if (updatedAt && checklists[0].updated_at && new Date(updatedAt) > new Date(checklists[0].updated_at)) {
+      checklistData = mergeChecklistWithTemplate(template, checklistData);
+    }
+
+    res.json({
+      ...checklists[0],
+      checklist_data: checklistData
+    });
   } catch (error) {
     console.error('Get kurir checklist error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
@@ -3741,17 +4174,28 @@ app.post('/api/orders/:id/kurir-checklist', authenticateToken, async (req, res) 
 // ========================================
 app.get('/api/orders/:id/kitchen-checklist', authenticateToken, async (req, res) => {
   try {
+    const { template, updatedAt } = await getChecklistTemplateWithMeta('dapur');
     const [checklists] = await pool.query(
       'SELECT * FROM kitchen_checklists WHERE order_id = ? ORDER BY created_at DESC LIMIT 1',
       [req.params.id]
     );
 
     if (checklists.length === 0) {
-      // Return default empty checklist if none exists
-      return res.json({ checklist_data: getDefaultChecklist(), order_id: req.params.id });
+      return res.json({ checklist_data: template, order_id: req.params.id });
     }
 
-    res.json(checklists[0]);
+    let checklistData = checklists[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+    if (updatedAt && checklists[0].updated_at && new Date(updatedAt) > new Date(checklists[0].updated_at)) {
+      checklistData = mergeChecklistWithTemplate(template, checklistData);
+    }
+
+    res.json({
+      ...checklists[0],
+      checklist_data: checklistData
+    });
   } catch (error) {
     console.error('Get kitchen checklist error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan' });
@@ -3793,6 +4237,7 @@ app.get('/api/operasional/checklist/:date', authenticateToken, async (req, res) 
   try {
     const shiftDate = req.params.date;
     const userId = req.user.id;
+    const { template, updatedAt } = await getChecklistTemplateWithMeta('operasional');
 
     const [checklists] = await pool.query(
       'SELECT * FROM operasional_checklists WHERE shift_date = ? AND saved_by = ? ORDER BY created_at DESC LIMIT 1',
@@ -3800,14 +4245,17 @@ app.get('/api/operasional/checklist/:date', authenticateToken, async (req, res) 
     );
 
     if (checklists.length === 0) {
-      // Return default empty checklist if none exists
-      return res.json({ checklist_data: getDefaultOperasionalChecklist(), shift_date: shiftDate });
+      return res.json({ checklist_data: template, shift_date: shiftDate });
     }
 
-    // Parse checklist_data if it's a string
     let checklistData = checklists[0].checklist_data;
     if (typeof checklistData === 'string') {
       checklistData = JSON.parse(checklistData);
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (shiftDate >= todayStr && updatedAt && checklists[0].updated_at && new Date(updatedAt) > new Date(checklists[0].updated_at)) {
+      checklistData = mergeChecklistWithTemplate(template, checklistData);
     }
 
     res.json({
@@ -3849,6 +4297,7 @@ app.get('/api/admin/checklist/:date', authenticateToken, authorizeRole('admin'),
   try {
     const checklistDate = req.params.date;
     const userId = req.user.id;
+    const { template, updatedAt } = await getChecklistTemplateWithMeta('admin');
 
     const [checklists] = await pool.query(
       'SELECT * FROM admin_checklists WHERE checklist_date = ? AND admin_id = ? ORDER BY created_at DESC LIMIT 1',
@@ -3856,14 +4305,17 @@ app.get('/api/admin/checklist/:date', authenticateToken, authorizeRole('admin'),
     );
 
     if (checklists.length === 0) {
-      // Return null to indicate no checklist exists yet
-      return res.json(null);
+      return res.json({ checklist_data: template, notes: '', checklist_date: checklistDate });
     }
 
-    // Parse checklist_data if it's a string
     let checklistData = checklists[0].checklist_data;
     if (typeof checklistData === 'string') {
       checklistData = JSON.parse(checklistData);
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (checklistDate >= todayStr && updatedAt && checklists[0].updated_at && new Date(updatedAt) > new Date(checklists[0].updated_at)) {
+      checklistData = mergeChecklistWithTemplate(template, checklistData);
     }
 
     res.json({
@@ -4874,15 +5326,18 @@ app.put('/api/company-settings', authenticateToken, authorizeRole('admin'), uplo
 // ========================================
 
 // Get invoice data for an order
-app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'marketing'), async (req, res) => {
+app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir', 'marketing', 'pembeli'), async (req, res) => {
   try {
     const orderId = req.params.id;
 
     // Build query with role-based access control
     let query = `
-      SELECT o.*, u.name as customer_name, u.email as customer_email, u.phone as customer_phone, u.address as customer_address
+      SELECT o.*,
+             u.name as customer_name, u.email as customer_email, u.phone as customer_phone, u.address as customer_address,
+             v.code as voucher_code, v.name as voucher_name
       FROM orders o
       JOIN users u ON o.user_id = u.id
+      LEFT JOIN vouchers v ON o.voucher_id = v.id
       WHERE o.id = ?
     `;
     const params = [orderId];
@@ -4890,6 +5345,9 @@ app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'ma
     // If user is marketing, only allow access to their own orders
     if (req.user.role === 'marketing') {
       query += ' AND o.marketing_id = ?';
+      params.push(req.user.id);
+    } else if (req.user.role === 'pembeli') {
+      query += ' AND o.user_id = ?';
       params.push(req.user.id);
     }
 
@@ -4901,9 +5359,12 @@ app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'ma
 
     const order = orders[0];
 
-    // Get order items
+    // Get order items with product category
     const [items] = await pool.query(
-      'SELECT * FROM order_items WHERE order_id = ?',
+      `SELECT oi.*, p.category as product_category
+       FROM order_items oi
+       LEFT JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id = ?`,
       [orderId]
     );
 
@@ -4916,9 +5377,9 @@ app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'ma
       company_email: null,
       company_logo_url: null,
       tax_id: null,
-      bank_name: null,
-      bank_account_number: null,
-      bank_account_name: null
+      bank_name: 'BRI',
+      bank_account_number: '3642-01-032854-53-5',
+      bank_account_name: 'Muhammad Al Hakim Pamungkas'
     };
 
     // Use guest customer info if available
@@ -7098,61 +7559,53 @@ function getDefaultKurirChecklist() {
   };
 }
 
-// ========================================
-// OPERASIONAL CHECKLIST ENDPOINTS
-// ========================================
-app.get('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
-  try {
-    const shiftDate = req.params.date;
-    const userId = req.user.id;
-
-    const [checklists] = await pool.query(
-      'SELECT * FROM operasional_checklists WHERE shift_date = ? AND saved_by = ? ORDER BY created_at DESC LIMIT 1',
-      [shiftDate, userId]
-    );
-
-    if (checklists.length === 0) {
-      // Return default empty checklist if none exists
-      return res.json({ checklist_data: getDefaultOperasionalChecklist(), shift_date: shiftDate });
-    }
-
-    // Parse checklist_data if it's a string
-    let checklistData = checklists[0].checklist_data;
-    if (typeof checklistData === 'string') {
-      checklistData = JSON.parse(checklistData);
-    }
-
-    res.json({
-      ...checklists[0],
-      checklist_data: checklistData
-    });
-  } catch (error) {
-    console.error('Get operasional checklist error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan' });
-  }
-});
-
-app.post('/api/operasional/checklist/:date', authenticateToken, async (req, res) => {
-  try {
-    const { checklist_data } = req.body;
-    const shiftDate = req.params.date;
-    const userId = req.user.id;
-
-    // Insert or update checklist
-    const [result] = await pool.query(
-      'INSERT INTO operasional_checklists (shift_date, checklist_data, saved_by) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE checklist_data = ?, updated_at = NOW()',
-      [shiftDate, JSON.stringify(checklist_data), userId, JSON.stringify(checklist_data)]
-    );
-
-    res.status(201).json({
-      message: 'Checklist berhasil disimpan',
-      checklist_id: result.insertId || result.affectedRows
-    });
-  } catch (error) {
-    console.error('Save operasional checklist error:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
-  }
-});
+// Helper function to return default admin checklist structure
+function getDefaultAdminChecklist() {
+  return {
+    daily: [
+      {
+        id: 'daily_1',
+        section: '1. Input Orderan di Dashboard',
+        items: [
+          { id: 'item_1', text: 'Input semua pesanan baru ke dashboard dengan data lengkap', checked: false },
+          { id: 'item_2', text: 'Pastikan status pesanan sudah sesuai', checked: false },
+          { id: 'item_3', text: 'Cek ulang agar tidak ada pesanan yang terlewat', checked: false },
+        ]
+      },
+      {
+        id: 'daily_2',
+        section: '2. Catat Keuangan di Arus Kas',
+        items: [
+          { id: 'item_1', text: 'Catat pemasukan & pengeluaran di arus kas', checked: false },
+          { id: 'item_2', text: 'Upload bukti transaksi setiap kali ada uang masuk atau keluar', checked: false },
+          { id: 'item_3', text: 'Pastikan saldo kas sesuai antara fisik dan dashboard', checked: false },
+        ]
+      },
+      {
+        id: 'daily_3',
+        section: '3. Pantau Transaksi Pesanan',
+        items: [
+          { id: 'item_1', text: 'Cek transaksi berjalan di dashboard', checked: false },
+          { id: 'item_2', text: 'Pastikan semua pembayaran sudah dikonfirmasi / valid', checked: false },
+          { id: 'item_3', text: 'Pantau pesanan COD / transfer sampai selesai', checked: false },
+          { id: 'item_4', text: 'Laporkan ke owner jika ada pesanan belum dibayar atau bermasalah', checked: false },
+        ]
+      },
+    ],
+    monthly: [
+      {
+        id: 'monthly_1',
+        section: 'CHECKLIST BULANAN',
+        items: [
+          { id: 'item_1', text: 'Export laporan penjualan & arus kas bulanan dari dashboard', checked: false },
+          { id: 'item_2', text: 'Verifikasi semua bukti transaksi lengkap dan tersimpan', checked: false },
+          { id: 'item_3', text: 'Rekap total pemasukan, pengeluaran, dan saldo akhir bulan', checked: false },
+          { id: 'item_4', text: 'Laporkan hasil keuangan bulanan ke owner', checked: false },
+        ]
+      },
+    ]
+  };
+}
 
 // Helper function to return default checklist structure
 function getDefaultChecklist() {
@@ -7228,6 +7681,627 @@ function getDefaultChecklist() {
     ]
   };
 }
+
+function getDefaultChecklistForRole(role) {
+  if (role === 'admin') return getDefaultAdminChecklist();
+  if (role === 'operasional') return getDefaultOperasionalChecklist();
+  if (role === 'kurir') return getDefaultKurirChecklist();
+  return getDefaultChecklist();
+}
+
+async function getChecklistTemplateWithMeta(role) {
+  const defaultTemplate = getDefaultChecklistForRole(role);
+  try {
+    const [rows] = await pool.query('SELECT template_data, updated_at FROM checklist_templates WHERE role = ?', [role]);
+    if (rows.length > 0 && rows[0].template_data) {
+      const parsed = typeof rows[0].template_data === 'string'
+        ? JSON.parse(rows[0].template_data)
+        : rows[0].template_data;
+      return { template: parsed, updatedAt: rows[0].updated_at };
+    }
+  } catch (e) {
+    console.error(`getChecklistTemplateWithMeta(${role}) error:`, e.message);
+  }
+  return { template: defaultTemplate, updatedAt: null };
+}
+
+function mergeChecklistWithTemplate(templateData, savedData) {
+  if (!templateData) return savedData;
+  if (!savedData) return JSON.parse(JSON.stringify(templateData));
+
+  const checkedMap = new Map();
+  const collectSaved = (sections = []) => {
+    for (const sec of sections) {
+      const secKey = sec.id || sec.section || sec.title || '';
+      for (const item of (sec.items || [])) {
+        checkedMap.set(`${secKey}::${item.id}`, !!item.checked);
+        if (item.text) {
+          checkedMap.set(`text::${secKey}::${item.text}`, !!item.checked);
+        }
+      }
+    }
+  };
+
+  if (Array.isArray(savedData.sections)) collectSaved(savedData.sections);
+  if (Array.isArray(savedData.daily)) collectSaved(savedData.daily);
+  if (Array.isArray(savedData.monthly)) collectSaved(savedData.monthly);
+
+  const rebuildSections = (sections = []) =>
+    sections.map(sec => {
+      const secKey = sec.id || sec.section || sec.title || '';
+      return {
+        ...sec,
+        items: (sec.items || []).map(item => ({
+          ...item,
+          checked: checkedMap.get(`${secKey}::${item.id}`) ?? checkedMap.get(`text::${secKey}::${item.text}`) ?? false
+        }))
+      };
+    });
+
+  if (Array.isArray(templateData.daily) || Array.isArray(templateData.monthly)) {
+    return {
+      daily: rebuildSections(templateData.daily || []),
+      monthly: rebuildSections(templateData.monthly || [])
+    };
+  }
+
+  return {
+    sections: rebuildSections(templateData.sections || [])
+  };
+}
+
+// ========================================
+// REVISI 5: PACKAGING STANDARDS ENDPOINTS
+// ========================================
+app.get('/api/packaging-standards', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT ps.*, u.name as updated_by_name
+       FROM packaging_standards ps
+       LEFT JOIN users u ON ps.updated_by = u.id
+       ORDER BY FIELD(ps.category, 'catering', 'aqiqah', 'event', 'store'), ps.id ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Get packaging standards error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat standar pengemasan' });
+  }
+});
+
+app.put('/api/packaging-standards/:category', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const category = String(req.params.category || '').toLowerCase().trim();
+    const { title, content } = req.body;
+    if (!category || content === undefined) {
+      return res.status(400).json({ message: 'Kategori dan catatan standar pengemasan wajib diisi' });
+    }
+    const defaultTitle = title || `Standar Pengemasan ${category.charAt(0).toUpperCase() + category.slice(1)}`;
+    await pool.query(
+      `INSERT INTO packaging_standards (category, title, content, updated_by)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE title = ?, content = ?, updated_by = ?, updated_at = NOW()`,
+      [category, defaultTitle, content, req.user.id, defaultTitle, content, req.user.id]
+    );
+    const [rows] = await pool.query('SELECT * FROM packaging_standards WHERE category = ?', [category]);
+    res.json({ message: 'Standar pengemasan berhasil disimpan', data: rows[0] });
+  } catch (error) {
+    console.error('Update packaging standard error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan standar pengemasan' });
+  }
+});
+
+// ========================================
+// REVISI 6: DELIVERY EQUIPMENT ENDPOINTS
+// ========================================
+app.get('/api/equipment', authenticateToken, async (req, res) => {
+  try {
+    const includeInactive = req.query.include_inactive === 'true';
+    const [rows] = await pool.query(
+      includeInactive
+        ? 'SELECT * FROM delivery_equipment_items ORDER BY name ASC'
+        : 'SELECT * FROM delivery_equipment_items WHERE is_active = 1 ORDER BY name ASC'
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Get delivery equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat daftar peralatan' });
+  }
+});
+
+app.post('/api/equipment', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir'), async (req, res) => {
+  try {
+    const { name, unit, stock, description } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ message: 'Nama peralatan wajib diisi' });
+    }
+    const [result] = await pool.query(
+      'INSERT INTO delivery_equipment_items (name, unit, stock, description, is_active) VALUES (?, ?, ?, ?, 1)',
+      [String(name).trim(), unit || 'Pcs', parseInt(stock, 10) || 0, description || null]
+    );
+    const [rows] = await pool.query('SELECT * FROM delivery_equipment_items WHERE id = ?', [result.insertId]);
+    res.status(201).json({ message: 'Peralatan berhasil ditambahkan', data: rows[0] });
+  } catch (error) {
+    console.error('Create equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambah peralatan' });
+  }
+});
+
+app.put('/api/equipment/:id', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir'), async (req, res) => {
+  try {
+    const { name, unit, stock, description, is_active } = req.body;
+    const [existing] = await pool.query('SELECT * FROM delivery_equipment_items WHERE id = ?', [req.params.id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Peralatan tidak ditemukan' });
+    }
+    await pool.query(
+      'UPDATE delivery_equipment_items SET name = ?, unit = ?, stock = ?, description = ?, is_active = ? WHERE id = ?',
+      [
+        name !== undefined ? String(name).trim() : existing[0].name,
+        unit !== undefined ? unit : existing[0].unit,
+        stock !== undefined ? (parseInt(stock, 10) || 0) : existing[0].stock,
+        description !== undefined ? description : existing[0].description,
+        is_active !== undefined ? (is_active ? 1 : 0) : existing[0].is_active,
+        req.params.id
+      ]
+    );
+    res.json({ message: 'Peralatan berhasil diupdate' });
+  } catch (error) {
+    console.error('Update equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mengupdate peralatan' });
+  }
+});
+
+app.delete('/api/equipment/:id', authenticateToken, authorizeRole('admin', 'operasional', 'dapur'), async (req, res) => {
+  try {
+    const [used] = await pool.query(
+      'SELECT COUNT(*) as total FROM order_delivery_equipment WHERE equipment_id = ?',
+      [req.params.id]
+    );
+    if ((used[0]?.total || 0) > 0) {
+      await pool.query('UPDATE delivery_equipment_items SET is_active = 0 WHERE id = ?', [req.params.id]);
+      return res.json({ message: 'Peralatan dinonaktifkan karena sudah memiliki riwayat pengantaran' });
+    }
+    await pool.query('DELETE FROM delivery_equipment_items WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Peralatan berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus peralatan' });
+  }
+});
+
+app.get('/api/equipment/recap', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT ode.*,
+              dei.name as equipment_name,
+              dei.unit as equipment_unit,
+              COALESCE(o.guest_customer_name, u.name) as customer_name,
+              COALESCE(o.guest_wa_number_1, u.phone) as customer_phone,
+              o.guest_event_date,
+              o.guest_event_time,
+              o.status as order_status,
+              o.delivery_address
+       FROM order_delivery_equipment ode
+       JOIN delivery_equipment_items dei ON ode.equipment_id = dei.id
+       JOIN orders o ON ode.order_id = o.id
+       JOIN users u ON o.user_id = u.id
+       WHERE ode.qty_brought > 0 OR ode.qty_borrowed > 0
+       ORDER BY ode.qty_borrowed DESC, ode.updated_at DESC`
+    );
+
+    const brought = rows.filter(r => r.qty_brought > 0);
+    const borrowed = rows.filter(r => r.qty_borrowed > 0);
+
+    res.json({
+      brought,
+      borrowed,
+      summary: {
+        total_orders_with_equipment: new Set(brought.map(r => r.order_id)).size,
+        total_brought_qty: brought.reduce((s, r) => s + (Number(r.qty_brought) || 0), 0),
+        total_borrowed_qty: borrowed.reduce((s, r) => s + (Number(r.qty_borrowed) || 0), 0),
+        total_borrowed_items: borrowed.length
+      }
+    });
+  } catch (error) {
+    console.error('Get equipment recap error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat rekap peralatan' });
+  }
+});
+
+app.get('/api/orders/:id/equipment', authenticateToken, async (req, res) => {
+  try {
+    const [orderRows] = await pool.query(
+      `SELECT ode.*, dei.name as equipment_name, dei.unit as equipment_unit
+       FROM order_delivery_equipment ode
+       JOIN delivery_equipment_items dei ON ode.equipment_id = dei.id
+       WHERE ode.order_id = ?
+       ORDER BY dei.name ASC`,
+      [req.params.id]
+    );
+    const [masterRows] = await pool.query(
+      'SELECT * FROM delivery_equipment_items WHERE is_active = 1 ORDER BY name ASC'
+    );
+    res.json({
+      items: orderRows,
+      catalog: masterRows
+    });
+  } catch (error) {
+    console.error('Get order equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat perlengkapan pesanan' });
+  }
+});
+
+app.post('/api/orders/:id/equipment', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const orderId = req.params.id;
+    const { items, mode } = req.body;
+    const effectiveMode = mode || (req.user.role === 'kurir' ? 'kurir' : 'dapur');
+
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ message: 'Format daftar perlengkapan tidak valid' });
+    }
+
+    await connection.beginTransaction();
+
+    if (effectiveMode === 'kurir') {
+      for (const item of items) {
+        const eqId = parseInt(item.equipment_id, 10);
+        if (!eqId) continue;
+        const [existingRows] = await connection.query(
+          'SELECT * FROM order_delivery_equipment WHERE order_id = ? AND equipment_id = ?',
+          [orderId, eqId]
+        );
+        if (existingRows.length === 0) continue;
+
+        const brought = Number(existingRows[0].qty_brought) || 0;
+        let returned = item.qty_returned !== undefined ? parseInt(item.qty_returned, 10) : existingRows[0].qty_returned;
+        if (Number.isNaN(returned) || returned < 0) returned = 0;
+        if (returned > brought) returned = brought;
+
+        let borrowed = Math.max(0, brought - returned);
+        if (item.qty_borrowed !== undefined && item.qty_returned === undefined) {
+          borrowed = Math.min(brought, Math.max(0, parseInt(item.qty_borrowed, 10) || 0));
+          returned = Math.max(0, brought - borrowed);
+        }
+
+        await connection.query(
+          `UPDATE order_delivery_equipment
+           SET qty_returned = ?, qty_borrowed = ?, checked_by_kurir = ?, notes = COALESCE(?, notes),
+               returned_at = IF(? = 0 AND ? > 0, NOW(), IF(? > 0, NULL, returned_at)),
+               updated_at = NOW()
+           WHERE order_id = ? AND equipment_id = ?`,
+          [returned, borrowed, req.user.id, item.notes || null, borrowed, returned, borrowed, orderId, eqId]
+        );
+      }
+    } else {
+      // Dapur / Admin / Operasional setting perlengkapan & jumlah dibawa
+      const activeEqIds = [];
+      for (const item of items) {
+        const eqId = parseInt(item.equipment_id, 10);
+        const brought = Math.max(0, parseInt(item.qty_brought, 10) || 0);
+        if (!eqId || brought <= 0) continue;
+        activeEqIds.push(eqId);
+
+        const [existingRows] = await connection.query(
+          'SELECT * FROM order_delivery_equipment WHERE order_id = ? AND equipment_id = ?',
+          [orderId, eqId]
+        );
+
+        if (existingRows.length > 0) {
+          const prevReturned = Math.min(brought, Number(existingRows[0].qty_returned) || 0);
+          const hasKurirChecked = Boolean(existingRows[0].checked_by_kurir) || prevReturned > 0 || Number(existingRows[0].qty_borrowed) > 0;
+          const borrowed = hasKurirChecked ? Math.max(0, brought - prevReturned) : 0;
+          await connection.query(
+            `UPDATE order_delivery_equipment
+             SET qty_brought = ?, qty_returned = ?, qty_borrowed = ?, recorded_by_dapur = ?, notes = ?, updated_at = NOW()
+             WHERE order_id = ? AND equipment_id = ?`,
+            [brought, prevReturned, borrowed, req.user.id, item.notes || existingRows[0].notes || null, orderId, eqId]
+          );
+        } else {
+          // By default before kurir verifies return, qty_borrowed = 0 or tracked when brought?
+          // Wait: when brought by courier, until kurir marks it Kembali or Dipinjam, keep qty_returned = 0 & qty_borrowed = 0 until checked OR wait:
+          // Actually client spec: Kurir checks Kembali or Dipinjam. Setting initial qty_returned = 0 & qty_borrowed = 0 lets Kurir decide cleanly, OR setting borrowed = 0 until checked!
+          await connection.query(
+            `INSERT INTO order_delivery_equipment
+             (order_id, equipment_id, qty_brought, qty_returned, qty_borrowed, notes, recorded_by_dapur)
+             VALUES (?, ?, ?, 0, 0, ?, ?)`,
+            [orderId, eqId, brought, item.notes || null, req.user.id]
+          );
+        }
+      }
+
+      if (activeEqIds.length > 0) {
+        const placeholders = activeEqIds.map(() => '?').join(',');
+        await connection.query(
+          `DELETE FROM order_delivery_equipment WHERE order_id = ? AND equipment_id NOT IN (${placeholders}) AND qty_returned = 0 AND qty_borrowed = 0`,
+          [orderId, ...activeEqIds]
+        );
+      } else {
+        await connection.query(
+          'DELETE FROM order_delivery_equipment WHERE order_id = ? AND qty_returned = 0 AND qty_borrowed = 0',
+          [orderId]
+        );
+      }
+    }
+
+    await connection.commit();
+    const [updatedRows] = await pool.query(
+      `SELECT ode.*, dei.name as equipment_name, dei.unit as equipment_unit
+       FROM order_delivery_equipment ode
+       JOIN delivery_equipment_items dei ON ode.equipment_id = dei.id
+       WHERE ode.order_id = ?
+       ORDER BY dei.name ASC`,
+      [orderId]
+    );
+    res.json({ message: 'Perlengkapan pengantaran berhasil disimpan', items: updatedRows });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Save order equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan perlengkapan pengantaran' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.put('/api/orders/:id/equipment/:itemId/return', authenticateToken, authorizeRole('admin', 'operasional', 'dapur', 'kurir'), async (req, res) => {
+  try {
+    const { id: orderId, itemId } = req.params;
+    const { return_qty, notes } = req.body || {};
+
+    const [rows] = await pool.query(
+      'SELECT * FROM order_delivery_equipment WHERE order_id = ? AND (id = ? OR equipment_id = ?) LIMIT 1',
+      [orderId, itemId, itemId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Data peralatan pesanan tidak ditemukan' });
+    }
+
+    const row = rows[0];
+    const brought = Number(row.qty_brought) || 0;
+    const addReturn = return_qty !== undefined ? Math.max(0, parseInt(return_qty, 10) || 0) : row.qty_borrowed;
+    const newReturned = Math.min(brought, (Number(row.qty_returned) || 0) + addReturn);
+    const newBorrowed = Math.max(0, brought - newReturned);
+
+    await pool.query(
+      `UPDATE order_delivery_equipment
+       SET qty_returned = ?, qty_borrowed = ?, checked_by_kurir = COALESCE(checked_by_kurir, ?),
+           notes = COALESCE(?, notes),
+           returned_at = IF(? = 0, NOW(), returned_at),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [newReturned, newBorrowed, req.user.id, notes || null, newBorrowed, row.id]
+    );
+
+    res.json({ message: 'Pengembalian peralatan berhasil dicatat' });
+  } catch (error) {
+    console.error('Return borrowed equipment error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat mencatat pengembalian peralatan' });
+  }
+});
+
+// ========================================
+// REVISI 7: ORDER ISSUES (LAPORKAN KENDALA) ENDPOINTS
+// ========================================
+app.get('/api/order-issues', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = `
+      SELECT oi.*,
+             COALESCE(o.guest_customer_name, u.name) as customer_name,
+             o.status as order_status,
+             o.guest_event_date,
+             rp.name as reported_by_name,
+             rs.name as resolved_by_name
+      FROM order_issues oi
+      JOIN orders o ON oi.order_id = o.id
+      JOIN users u ON o.user_id = u.id
+      LEFT JOIN users rp ON oi.reported_by = rp.id
+      LEFT JOIN users rs ON oi.resolved_by = rs.id
+    `;
+    const params = [];
+    if (status && status !== 'all') {
+      query += ' WHERE oi.status = ?';
+      params.push(status);
+    }
+    query += ' ORDER BY oi.status ASC, oi.created_at DESC';
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (error) {
+    console.error('Get order issues error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat laporan kendala' });
+  }
+});
+
+app.get('/api/orders/:id/issues', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT oi.*, rp.name as reported_by_name, rs.name as resolved_by_name
+       FROM order_issues oi
+       LEFT JOIN users rp ON oi.reported_by = rp.id
+       LEFT JOIN users rs ON oi.resolved_by = rs.id
+       WHERE oi.order_id = ?
+       ORDER BY oi.created_at DESC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Get issues by order error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
+  }
+});
+
+app.post('/api/orders/:id/issues', authenticateToken, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const { issue_type, cause, follow_up, solution } = req.body;
+    if (!issue_type || !String(issue_type).trim()) {
+      return res.status(400).json({ message: 'Jenis masalah wajib diisi' });
+    }
+    const [orders] = await pool.query('SELECT id FROM orders WHERE id = ?', [orderId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+    const [result] = await pool.query(
+      `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+      [orderId, req.user.id, req.user.role, String(issue_type).trim(), cause || null, follow_up || null, solution || null]
+    );
+    const [rows] = await pool.query(
+      `SELECT oi.*, rp.name as reported_by_name
+       FROM order_issues oi
+       LEFT JOIN users rp ON oi.reported_by = rp.id
+       WHERE oi.id = ?`,
+      [result.insertId]
+    );
+    res.status(201).json({ message: 'Kendala berhasil dilaporkan ke dashboard Admin & Operasional', data: rows[0] });
+  } catch (error) {
+    console.error('Create order issue error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat melaporkan kendala' });
+  }
+});
+
+app.put('/api/order-issues/:id/resolve', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const { solution } = req.body || {};
+    if (solution !== undefined && solution !== '') {
+      await pool.query(
+        `UPDATE order_issues SET status = 'resolved', solution = ?, resolved_by = ?, resolved_at = NOW() WHERE id = ?`,
+        [solution, req.user.id, req.params.id]
+      );
+    } else {
+      await pool.query(
+        `UPDATE order_issues SET status = 'resolved', resolved_by = ?, resolved_at = NOW() WHERE id = ?`,
+        [req.user.id, req.params.id]
+      );
+    }
+    res.json({ message: 'Kendala berhasil ditandai selesai' });
+  } catch (error) {
+    console.error('Resolve order issue error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyelesaikan kendala' });
+  }
+});
+
+// ========================================
+// REVISI 8: CHECKLIST TEMPLATES & ROLE DAILY CHECKLISTS
+// ========================================
+app.get('/api/checklist-templates', authenticateToken, async (req, res) => {
+  try {
+    const roles = ['admin', 'operasional', 'dapur', 'kurir'];
+    const result = {};
+    for (const r of roles) {
+      const { template, updatedAt } = await getChecklistTemplateWithMeta(r);
+      result[r] = { role: r, template_data: template, updated_at: updatedAt };
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Get checklist templates error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat template checklist' });
+  }
+});
+
+app.get('/api/checklist-templates/:role', authenticateToken, async (req, res) => {
+  try {
+    const role = String(req.params.role || '').toLowerCase();
+    if (!['admin', 'operasional', 'dapur', 'kurir'].includes(role)) {
+      return res.status(400).json({ message: 'Role tidak valid' });
+    }
+    const { template, updatedAt } = await getChecklistTemplateWithMeta(role);
+    res.json({ role, template_data: template, updated_at: updatedAt });
+  } catch (error) {
+    console.error('Get checklist template error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat template checklist' });
+  }
+});
+
+app.put('/api/checklist-templates/:role', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const role = String(req.params.role || '').toLowerCase();
+    if (!['admin', 'operasional', 'dapur', 'kurir'].includes(role)) {
+      return res.status(400).json({ message: 'Role tidak valid' });
+    }
+    const { template_data } = req.body;
+    if (!template_data || typeof template_data !== 'object') {
+      return res.status(400).json({ message: 'Data template checklist tidak valid' });
+    }
+
+    await pool.query(
+      `INSERT INTO checklist_templates (role, template_data, updated_by)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE template_data = ?, updated_by = ?, updated_at = NOW()`,
+      [role, JSON.stringify(template_data), req.user.id, JSON.stringify(template_data), req.user.id]
+    );
+    res.json({ message: `Template checklist role ${role} berhasil disimpan` });
+  } catch (error) {
+    console.error('Save checklist template error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan template checklist' });
+  }
+});
+
+app.get('/api/role-checklist/:role/:date', authenticateToken, async (req, res) => {
+  try {
+    const role = String(req.params.role || '').toLowerCase();
+    const checklistDate = req.params.date;
+    const userId = req.user.id;
+    const { template, updatedAt } = await getChecklistTemplateWithMeta(role);
+
+    const [rows] = await pool.query(
+      'SELECT * FROM daily_role_checklists WHERE role = ? AND checklist_date = ? AND user_id = ? LIMIT 1',
+      [role, checklistDate, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ role, checklist_date: checklistDate, checklist_data: template, notes: '' });
+    }
+
+    let checklistData = rows[0].checklist_data;
+    if (typeof checklistData === 'string') {
+      checklistData = JSON.parse(checklistData);
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (checklistDate >= todayStr && updatedAt && rows[0].updated_at && new Date(updatedAt) > new Date(rows[0].updated_at)) {
+      checklistData = mergeChecklistWithTemplate(template, checklistData);
+    }
+
+    res.json({
+      ...rows[0],
+      checklist_data: checklistData
+    });
+  } catch (error) {
+    console.error('Get role daily checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat memuat checklist' });
+  }
+});
+
+app.post('/api/role-checklist/:role/:date', authenticateToken, async (req, res) => {
+  try {
+    const role = String(req.params.role || '').toLowerCase();
+    const checklistDate = req.params.date;
+    const userId = req.user.id;
+    const { checklist_data, notes } = req.body;
+
+    await pool.query(
+      `INSERT INTO daily_role_checklists (role, checklist_date, user_id, checklist_data, notes)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE checklist_data = ?, notes = ?, updated_at = NOW()`,
+      [
+        role,
+        checklistDate,
+        userId,
+        JSON.stringify(checklist_data),
+        notes || null,
+        JSON.stringify(checklist_data),
+        notes || null
+      ]
+    );
+
+    res.status(201).json({ message: 'Checklist berhasil disimpan' });
+  } catch (error) {
+    console.error('Save role daily checklist error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menyimpan checklist' });
+  }
+});
 
 module.exports = app;
 

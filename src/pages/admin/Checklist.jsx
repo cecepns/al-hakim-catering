@@ -60,8 +60,20 @@ const AdminChecklist = () => {
     try {
       setLoading(true);
       const response = await adminChecklistAPI.getByDate(selectedDate);
-      if (response.data) {
-        setChecklist(response.data.checklist_data);
+      if (response.data && response.data.checklist_data) {
+        let parsed = response.data.checklist_data;
+        if (typeof parsed === 'string') {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch (err) {
+            console.error('Parse checklist_data error:', err);
+            parsed = getDefaultChecklist();
+          }
+        }
+        setChecklist({
+          daily: Array.isArray(parsed?.daily) ? parsed.daily : getDefaultChecklist().daily,
+          monthly: Array.isArray(parsed?.monthly) ? parsed.monthly : getDefaultChecklist().monthly,
+        });
         setNotes(response.data.notes || '');
       } else {
         setChecklist(getDefaultChecklist());
@@ -82,10 +94,10 @@ const AdminChecklist = () => {
 
   const handleItemToggle = (type, sectionId, itemId) => {
     setChecklist((prev) => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const section = updated[type].find((s) => s.id === sectionId);
+      const updated = JSON.parse(JSON.stringify(prev || { daily: [], monthly: [] }));
+      const section = (updated[type] || []).find((s) => s.id === sectionId);
       if (section) {
-        const item = section.items.find((i) => i.id === itemId);
+        const item = (section.items || []).find((i) => i.id === itemId);
         if (item) {
           item.checked = !item.checked;
         }
@@ -111,12 +123,12 @@ const AdminChecklist = () => {
   };
 
   const getProgress = (type) => {
-    if (!checklist || !checklist[type]) return 0;
+    if (!checklist || !Array.isArray(checklist[type])) return 0;
     const sections = checklist[type];
     let total = 0;
     let checked = 0;
     sections.forEach((section) => {
-      section.items.forEach((item) => {
+      (section.items || []).forEach((item) => {
         total++;
         if (item.checked) checked++;
       });

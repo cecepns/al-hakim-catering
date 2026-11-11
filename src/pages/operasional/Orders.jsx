@@ -237,6 +237,9 @@ const OperasionalOrders = () => {
                       WA
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+                      Kategori
+                    </th>
+                    <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
                       Status
                     </th>
                     <th className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
@@ -290,6 +293,26 @@ const OperasionalOrders = () => {
                         {order.guest_wa_number_1 || order.customer_phone || '-'}
                         {order.guest_wa_number_2 && (
                           <div className="text-xs text-gray-500">{order.guest_wa_number_2}</div>
+                        )}
+                      </td>
+                      <td className="px-3 md:px-4 py-4 whitespace-nowrap">
+                        {order.categories ? (
+                          <div className="flex flex-wrap gap-1">
+                            {String(order.categories)
+                              .split(',')
+                              .map((c) => c.trim())
+                              .filter(Boolean)
+                              .map((cat) => (
+                                <span
+                                  key={cat}
+                                  className="px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 uppercase"
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </td>
                         <td className="px-3 md:px-4 py-4 whitespace-nowrap">

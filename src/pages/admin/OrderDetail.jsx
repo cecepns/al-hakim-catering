@@ -7,6 +7,11 @@ import ImageViewer from '../../components/ImageViewer';
 import InvoiceModal from '../../components/InvoiceModal';
 import OrderCostManagement from '../../components/OrderCostManagement';
 import OrderProcessCostSection from '../../components/OrderProcessCostSection';
+import PackagingStandardsSection from '../../components/PackagingStandardsSection';
+import OrderDeliveryEquipmentSection from '../../components/OrderDeliveryEquipmentSection';
+import OrderIssuesListSection from '../../components/OrderIssuesListSection';
+import ReportIssueBox from '../../components/ReportIssueBox';
+import CompletionFeedbackBox from '../../components/CompletionFeedbackBox';
 
 const AdminOrderDetail = () => {
   const { id } = useParams();
@@ -37,6 +42,21 @@ const AdminOrderDetail = () => {
   const [loadingInventory, setLoadingInventory] = useState(false);
   const [modalRows, setModalRows] = useState([]);
   const [materialsState, setMaterialsState] = useState({});
+
+  // States for Laporkan Kendala & Review/Komplin saat Selesai (Revisi 7)
+  const [hasIssue, setHasIssue] = useState(false);
+  const [issueData, setIssueData] = useState({
+    issue_type: '',
+    issue_cause: '',
+    issue_follow_up: '',
+    issue_solution: '',
+  });
+  const [feedbackData, setFeedbackData] = useState({
+    feedback_type: '',
+    feedback_rating: 5,
+    feedback_notes: '',
+    feedback_image: null,
+  });
 
   const fetchInventory = async () => {
     try {
@@ -165,6 +185,11 @@ const AdminOrderDetail = () => {
   const handleStatusUpdate = async () => {
     if (!newStatus) return;
 
+    if (hasIssue && !issueData.issue_type.trim()) {
+      alert('Jenis masalah wajib diisi jika Laporkan kendala dicentang');
+      return;
+    }
+
     try {
       setUpdating(true);
       const formData = new FormData();
@@ -173,7 +198,24 @@ const AdminOrderDetail = () => {
       if (proofFile) {
         formData.append('proof', proofFile);
       }
-      
+
+      if (hasIssue) {
+        formData.append('has_issue', 'true');
+        formData.append('issue_type', issueData.issue_type.trim());
+        formData.append('issue_cause', issueData.issue_cause || '');
+        formData.append('issue_follow_up', issueData.issue_follow_up || '');
+        formData.append('issue_solution', issueData.issue_solution || '');
+      }
+
+      if (newStatus === 'selesai' && feedbackData.feedback_type) {
+        formData.append('feedback_type', feedbackData.feedback_type);
+        formData.append('feedback_rating', String(feedbackData.feedback_rating || 5));
+        formData.append('feedback_notes', feedbackData.feedback_notes || '');
+        if (feedbackData.feedback_image) {
+          formData.append('feedback_image', feedbackData.feedback_image);
+        }
+      }
+
       // Integrasi Pembatalan Pesanan dengan Refund (Halaman 9 & 10 PDF)
       if (newStatus === 'dibatalkan' && isRefund && refundAmount) {
         formData.append('refund_amount', refundAmount);
@@ -198,7 +240,7 @@ const AdminOrderDetail = () => {
 
         // 2. Simpan bahan baku persediaan jika ada yang dicentang
         const selectedMaterials = Object.entries(materialsState)
-          .filter(([_, val]) => val?.checked && parseFloat(val?.quantity) > 0)
+          .filter(([, val]) => val?.checked && parseFloat(val?.quantity) > 0)
           .map(([itemId, val]) => ({
             inventory_item_id: itemId,
             quantity: parseFloat(val.quantity)
@@ -220,6 +262,9 @@ const AdminOrderDetail = () => {
       setRefundNotes('');
       setModalRows([]);
       setMaterialsState({});
+      setHasIssue(false);
+      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+      setFeedbackData({ feedback_type: '', feedback_rating: 5, feedback_notes: '', feedback_image: null });
       fetchOrder();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -582,6 +627,16 @@ const AdminOrderDetail = () => {
                         {item.variant_name && (
                           <p className="text-sm text-gray-600">Varian: {item.variant_name}</p>
                         )}
+                        {item.variant_notes && (
+                          <p className="text-xs text-purple-800 bg-purple-50 px-2 py-0.5 rounded inline-block mt-1">
+                            Catatan variasi: {item.variant_notes}
+                          </p>
+                        )}
+                        {Number(item.product_discount_amount) > 0 && (
+                          <p className="text-xs text-green-700 mt-0.5">
+                            Diskon Produk ({item.discount_percentage}%): -Rp {formatRupiah(item.product_discount_amount)}
+                          </p>
+                        )}
                         {addons.length > 0 && (
                           <div className="mt-1">
                             <p className="text-sm font-medium text-gray-700">Add-on:</p>
@@ -614,28 +669,58 @@ const AdminOrderDetail = () => {
                 })}
               </div>
 
-              <div className="mt-6 space-y-2">
-                <div className="flex justify-between text-gray-700">
-                  <span>Subtotal:</span>
-                  <span>Rp {formatRupiah(order.total_amount)}</span>
-                </div>
-                {order.discount_amount > 0 && (
-                  <div className="flex justify-between text-green-600">
-                    <span>Diskon:</span>
-                    <span>- Rp {formatRupiah(order.discount_amount)}</span>
+              {(() => {
+                const totalProductDiscount = (order.items || []).reduce(
+                  (sum, it) => sum + (Number(it.product_discount_amount) || 0),
+                  0
+                );
+                const subtotalAfterProduct = Number(order.total_amount || 0);
+                const normalSubtotal = subtotalAfterProduct + totalProductDiscount;
+                return (
+                  <div className="mt-6 space-y-2">
+                    {totalProductDiscount > 0 && (
+                      <>
+                        <div className="flex justify-between text-gray-600 text-sm">
+                          <span>Harga Awal:</span>
+                          <span>Rp {formatRupiah(normalSubtotal)}</span>
+                        </div>
+                        <div className="flex justify-between text-green-600 text-sm">
+                          <span>Diskon Produk:</span>
+                          <span>- Rp {formatRupiah(totalProductDiscount)}</span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex justify-between text-gray-700">
+                      <span>Subtotal:</span>
+                      <span>Rp {formatRupiah(order.total_amount)}</span>
+                    </div>
+                    {order.discount_amount > 0 && (
+                      <div className="flex justify-between text-green-600">
+                        <span>
+                          Diskon Voucher{order.voucher_code ? ` (${order.voucher_code})` : ''}:
+                        </span>
+                        <span>- Rp {formatRupiah(order.discount_amount)}</span>
+                      </div>
+                    )}
+                    {order.cashback_used > 0 && (
+                      <div className="flex justify-between text-primary-600">
+                        <span>Cashback Digunakan:</span>
+                        <span>- Rp {formatRupiah(order.cashback_used)}</span>
+                      </div>
+                    )}
+                    {Number(order.margin_amount) > 0 && (
+                      <div className="flex justify-between text-gray-700">
+                        <span>Margin Tambahan:</span>
+                        <span>+ Rp {formatRupiah(order.margin_amount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t">
+                      <span>Total:</span>
+                      <span>Rp {formatRupiah(order.final_amount)}</span>
+                    </div>
                   </div>
-                )}
-                {order.cashback_used > 0 && (
-                  <div className="flex justify-between text-primary-600">
-                    <span>Cashback Digunakan:</span>
-                    <span>- Rp {formatRupiah(order.cashback_used)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-lg font-bold text-gray-900 pt-2 border-t">
-                  <span>Total:</span>
-                  <span>Rp {formatRupiah(order.final_amount)}</span>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             {/* Status Logs */}
@@ -691,8 +776,17 @@ const AdminOrderDetail = () => {
                 </div>
               </div>
             )}
+            {/* Standar Pengemasan (Otomatis per Kategori, Editable oleh Admin) */}
+            <PackagingStandardsSection order={order} canEdit={true} />
+
             {/* MODAL & HPP PESANAN (Halaman 8 & 9 PDF) */}
             <OrderCostManagement orderId={id} onUpdated={fetchOrder} />
+
+            {/* Rekap Perlengkapan Pengantaran */}
+            <OrderDeliveryEquipmentSection orderId={id} mode="readonly" />
+
+            {/* Daftar Laporan Kendala Pesanan */}
+            <OrderIssuesListSection issues={order.issues} canResolve={true} onResolved={fetchOrder} />
           </div>
 
           {/* Actions */}
@@ -723,7 +817,7 @@ const AdminOrderDetail = () => {
         {statusModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className={`bg-white rounded-xl shadow-xl w-full p-6 max-h-[90vh] overflow-y-auto transition-all ${
-              newStatus === 'diproses' ? 'max-w-3xl' : 'max-w-md'
+              newStatus === 'diproses' ? 'max-w-3xl' : 'max-w-lg'
             }`}>
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Update Status Pesanan</h3>
               <div className="space-y-4">
@@ -871,6 +965,20 @@ const AdminOrderDetail = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Review atau Komplin saat Pesanan Selesai */}
+                {newStatus === 'selesai' && (
+                  <CompletionFeedbackBox values={feedbackData} onChange={setFeedbackData} />
+                )}
+
+                {/* Laporkan Kendala */}
+                <ReportIssueBox
+                  checked={hasIssue}
+                  onCheckedChange={setHasIssue}
+                  values={issueData}
+                  onChange={setIssueData}
+                />
+
                 <div className="flex space-x-3">
                   <button
                     onClick={() => {
@@ -884,6 +992,9 @@ const AdminOrderDetail = () => {
                       setRefundNotes('');
                       setModalRows([]);
                       setMaterialsState({});
+                      setHasIssue(false);
+                      setIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+                      setFeedbackData({ feedback_type: '', feedback_rating: 5, feedback_notes: '', feedback_image: null });
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
                   >

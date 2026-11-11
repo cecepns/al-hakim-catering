@@ -32,6 +32,8 @@ import AdminLabaRugi from './pages/admin/LabaRugi';
 import AdminPurchases from './pages/admin/Purchases';
 import InventoryManagement from './pages/shared/InventoryManagement';
 import PurchaseRequests from './pages/shared/PurchaseRequests';
+import DeliveryEquipment from './pages/shared/DeliveryEquipment';
+import RoleDailyChecklist from './pages/shared/RoleDailyChecklist';
 import AdminCart from './pages/admin/Cart';
 
 // Pembeli Pages
@@ -197,6 +199,14 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['admin']}>
             <AdminChecklist />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/equipment"
+        element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <DeliveryEquipment role="admin" />
           </ProtectedRoute>
         }
       />
@@ -415,6 +425,22 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/operasional/reviews"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <AdminReviews />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/operasional/equipment"
+        element={
+          <ProtectedRoute allowedRoles={['operasional']}>
+            <DeliveryEquipment role="operasional" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/operasional/purchase-requests"
         element={
           <ProtectedRoute allowedRoles={['operasional']}>
@@ -457,6 +483,22 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/dapur/checklist"
+        element={
+          <ProtectedRoute allowedRoles={['dapur']}>
+            <RoleDailyChecklist role="dapur" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dapur/equipment"
+        element={
+          <ProtectedRoute allowedRoles={['dapur']}>
+            <DeliveryEquipment role="dapur" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/dapur/purchase-requests"
         element={
           <ProtectedRoute allowedRoles={['dapur']}>
@@ -495,6 +537,22 @@ const AppRoutes = () => {
         element={
           <ProtectedRoute allowedRoles={['kurir']}>
             <KurirOrderDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/kurir/checklist"
+        element={
+          <ProtectedRoute allowedRoles={['kurir']}>
+            <RoleDailyChecklist role="kurir" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/kurir/equipment"
+        element={
+          <ProtectedRoute allowedRoles={['kurir']}>
+            <DeliveryEquipment role="kurir" />
           </ProtectedRoute>
         }
       />

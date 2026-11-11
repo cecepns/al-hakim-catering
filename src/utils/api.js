@@ -82,6 +82,9 @@ export const orderAPI = {
   addComplaint: (id, data) => api.post(`/orders/${id}/complaint`, data, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  addFeedback: (id, formData) => api.post(`/orders/${id}/feedback`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
   uploadProof: (id, formData) => api.post(`/orders/${id}/proof`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
@@ -261,6 +264,40 @@ export const orderCostsAPI = {
 
 export const labaRugiAPI = {
   getSummary: (params) => api.get('/laba-rugi/summary', { params }),
+};
+
+export const packagingStandardsAPI = {
+  getAll: () => api.get('/packaging-standards'),
+  update: (category, data) => api.put(`/packaging-standards/${category}`, data),
+};
+
+export const equipmentAPI = {
+  getAll: (params) => api.get('/equipment', { params }),
+  create: (data) => api.post('/equipment', data),
+  update: (id, data) => api.put(`/equipment/${id}`, data),
+  delete: (id) => api.delete(`/equipment/${id}`),
+  getRecap: (params) => api.get('/equipment/recap', { params }),
+  getByOrder: (orderId) => api.get(`/orders/${orderId}/equipment`),
+  saveForOrder: (orderId, data) => api.post(`/orders/${orderId}/equipment`, data),
+  markReturned: (orderId, itemId, data) => api.put(`/orders/${orderId}/equipment/${itemId}/return`, data || {}),
+};
+
+export const orderIssuesAPI = {
+  getAll: (params) => api.get('/order-issues', { params }),
+  getByOrder: (orderId) => api.get(`/orders/${orderId}/issues`),
+  create: (orderId, data) => api.post(`/orders/${orderId}/issues`, data),
+  resolve: (issueId, data) => api.put(`/order-issues/${issueId}/resolve`, data || {}),
+};
+
+export const checklistTemplateAPI = {
+  getAll: () => api.get('/checklist-templates'),
+  getByRole: (role) => api.get(`/checklist-templates/${role}`),
+  update: (role, template_data) => api.put(`/checklist-templates/${role}`, { template_data }),
+};
+
+export const roleChecklistAPI = {
+  getByDate: (role, date) => api.get(`/role-checklist/${role}/${date}`),
+  save: (role, date, data) => api.post(`/role-checklist/${role}/${date}`, data),
 };
 
 export default api;
