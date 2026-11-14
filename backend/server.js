@@ -8294,6 +8294,19 @@ app.put('/api/order-issues/:id/resolve', authenticateToken, authorizeRole('admin
   }
 });
 
+app.delete('/api/order-issues/:id', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const [result] = await pool.query('DELETE FROM order_issues WHERE id = ?', [req.params.id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Laporan kendala tidak ditemukan' });
+    }
+    res.json({ message: 'Laporan kendala berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete order issue error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus kendala' });
+  }
+});
+
 // ========================================
 // REVISI: TAMBAH DP PESANAN ENDPOINTS
 // ========================================

@@ -295,6 +295,7 @@ export const orderIssuesAPI = {
     return api.post(`/orders/${orderId}/issues`, data);
   },
   resolve: (issueId, data) => api.put(`/order-issues/${issueId}/resolve`, data || {}),
+  delete: (issueId) => api.delete(`/order-issues/${issueId}`),
 };
 
 export const orderDpAPI = {

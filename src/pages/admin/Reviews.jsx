@@ -114,6 +114,18 @@ const AdminReviews = () => {
     }
   };
 
+  const handleDeleteIssue = async (issueId) => {
+    if (!window.confirm('Yakin ingin menghapus laporan kendala ini? Data tidak dapat dikembalikan.')) return;
+    try {
+      await orderIssuesAPI.delete(issueId);
+      toast.success('Laporan kendala berhasil dihapus');
+      fetchIssues();
+    } catch (error) {
+      console.error('Error deleting issue:', error);
+      toast.error(error.response?.data?.message || 'Gagal menghapus kendala');
+    }
+  };
+
   const getRatingStars = (rating) => {
     return Array.from({ length: 5 }, (_, i) => (
       <svg
@@ -535,17 +547,17 @@ const AdminReviews = () => {
                         </div>
                       )}
 
-                      {issue.status === 'resolved' ? (
-                        issue.resolved_by_name && (
-                          <p className="text-xs text-green-700">
-                            Diselesaikan oleh {issue.resolved_by_name} pada{' '}
-                            {issue.resolved_at
-                              ? new Date(issue.resolved_at).toLocaleString('id-ID')
-                              : '-'}
-                          </p>
-                        )
-                      ) : resolvingIssueId === issue.id ? (
-                        <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                      {issue.status === 'resolved' && issue.resolved_by_name && (
+                        <p className="text-xs text-green-700 mb-2">
+                          Diselesaikan oleh {issue.resolved_by_name} pada{' '}
+                          {issue.resolved_at
+                            ? new Date(issue.resolved_at).toLocaleString('id-ID')
+                            : '-'}
+                        </p>
+                      )}
+
+                      {resolvingIssueId === issue.id ? (
+                        <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2 mb-2">
                           <label className="block text-xs font-medium text-gray-700">
                             Catatan Solusi Akhir (Opsional)
                           </label>
@@ -577,17 +589,35 @@ const AdminReviews = () => {
                             </button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="flex justify-end">
+                      ) : null}
+
+                      <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteIssue(issue.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border border-red-200 rounded-lg text-xs font-semibold transition"
+                          title="Hapus Laporan Kendala"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Hapus Kendala
+                        </button>
+
+                        {issue.status === 'resolved' ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-700 font-medium bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+                            <CheckCircle2 className="w-3 h-3 text-green-600" />
+                            Telah Selesai
+                          </span>
+                        ) : resolvingIssueId === issue.id ? null : (
                           <button
                             type="button"
                             onClick={() => startResolveIssue(issue)}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs font-semibold shadow-sm transition"
                           >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
                             Tandai Selesai
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
