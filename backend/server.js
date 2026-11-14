@@ -14,18 +14,29 @@ const PORT = process.env.PORT || 5000;
 
 // app.use(cors());
 // app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads-alhakim-catering')));
+const uploadsDir = path.join(__dirname, 'uploads-alhakim-catering');
+const altUploadsDir = path.join(__dirname, 'uploads');
 
-if (!fs.existsSync('uploads')) {
-  fs.mkdirSync('uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
+if (!fs.existsSync(altUploadsDir)) {
+  fs.mkdirSync(altUploadsDir, { recursive: true });
+}
+
+app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(altUploadsDir));
+app.use('/al-hakim/uploads', express.static(uploadsDir));
+app.use('/al-hakim/uploads', express.static(altUploadsDir));
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    const dest = fs.existsSync(uploadsDir) ? uploadsDir : altUploadsDir;
+    cb(null, dest);
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
+    const cleanName = (file.originalname || 'file').replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, Date.now() + '-' + cleanName);
   }
 });
 
@@ -222,8 +233,29 @@ async function ensureRevisionsSchema() {
         \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+    // Ensure photo_url column exists in order_issues
+    await ensureColumnIfMissing('order_issues', 'photo_url', 'ALTER TABLE `order_issues` ADD COLUMN `photo_url` VARCHAR(255) NULL AFTER `solution`');
   } catch (err) {
     console.error('ensureRevisionsSchema order_issues error:', err.message);
+  }
+
+  // Order DP Payments table (Revisi Tambah DP)
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`order_dp_payments\` (
+        \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+        \`order_id\` INT NOT NULL,
+        \`amount\` DECIMAL(15,2) NOT NULL,
+        \`payment_date\` DATE NOT NULL,
+        \`proof_url\` VARCHAR(255) NULL,
+        \`notes\` TEXT NULL,
+        \`created_by\` INT NULL,
+        \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX \`idx_order_dp_order_id\` (\`order_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  } catch (err) {
+    console.error('ensureRevisionsSchema order_dp_payments error:', err.message);
   }
 
   // Checklist templates & daily role checklists
@@ -1305,11 +1337,27 @@ app.get('/api/orders/:id', authenticateToken, async (req, res) => {
       // Ignore if table not initialized yet
     }
 
+    let dp_payments = [];
+    try {
+      const [dpRows] = await pool.query(
+        `SELECT dp.*, u.name as created_by_name
+         FROM order_dp_payments dp
+         LEFT JOIN users u ON dp.created_by = u.id
+         WHERE dp.order_id = ?
+         ORDER BY dp.payment_date ASC, dp.created_at ASC`,
+        [req.params.id]
+      );
+      dp_payments = dpRows;
+    } catch (e) {
+      // Ignore if table not initialized yet
+    }
+
     res.json({
       ...orders[0],
       items,
       statusLogs,
-      issues
+      issues,
+      dp_payments
     });
   } catch (error) {
     console.error('Get order error:', error);
@@ -2082,7 +2130,8 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
   { name: 'proof', maxCount: 1 },
   { name: 'proof_shipping', maxCount: 1 },
   { name: 'proof_delivery', maxCount: 1 },
-  { name: 'feedback_image', maxCount: 1 }
+  { name: 'feedback_image', maxCount: 1 },
+  { name: 'issue_photo', maxCount: 1 }
 ]), async (req, res) => {
   try {
     const { status, notes } = req.body;
@@ -2107,6 +2156,11 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
       feedback_image_url = `/uploads/${req.files.feedback_image[0].filename}`;
     }
 
+    let issue_photo_url = null;
+    if (req.files && req.files.issue_photo && req.files.issue_photo[0]) {
+      issue_photo_url = `/uploads/${req.files.issue_photo[0].filename}`;
+    }
+
     // Get current order info before update
     const [currentOrders] = await pool.query('SELECT user_id, status, final_amount FROM orders WHERE id = ?', [req.params.id]);
     const currentStatus = currentOrders.length > 0 ? currentOrders[0].status : null;
@@ -2127,8 +2181,8 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
     if (hasIssue && req.body.issue_type && String(req.body.issue_type).trim()) {
       try {
         await pool.query(
-          `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+          `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, photo_url, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
           [
             req.params.id,
             req.user.id,
@@ -2136,7 +2190,8 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
             String(req.body.issue_type).trim(),
             req.body.issue_cause || null,
             req.body.issue_follow_up || null,
-            req.body.issue_solution || null
+            req.body.issue_solution || null,
+            issue_photo_url
           ]
         );
       } catch (issueErr) {
@@ -5388,13 +5443,29 @@ app.get('/api/orders/:id/invoice', authenticateToken, authorizeRole('admin', 'op
     const customerEmail = order.customer_email;
     const customerAddress = order.delivery_address;
 
+    let dp_payments = [];
+    try {
+      const [dpRows] = await pool.query(
+        `SELECT dp.*, u.name as created_by_name
+         FROM order_dp_payments dp
+         LEFT JOIN users u ON dp.created_by = u.id
+         WHERE dp.order_id = ?
+         ORDER BY dp.payment_date ASC, dp.created_at ASC`,
+        [orderId]
+      );
+      dp_payments = dpRows;
+    } catch (e) {
+      // Ignore
+    }
+
     res.json({
       order: {
         ...order,
         customer_name: customerName,
         customer_phone: customerPhone,
         customer_email: customerEmail,
-        customer_address: customerAddress
+        customer_address: customerAddress,
+        dp_payments
       },
       items,
       company
@@ -8131,7 +8202,7 @@ app.get('/api/orders/:id/issues', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/orders/:id/issues', authenticateToken, async (req, res) => {
+app.post('/api/orders/:id/issues', authenticateToken, upload.single('photo'), async (req, res) => {
   try {
     const orderId = req.params.id;
     const { issue_type, cause, follow_up, solution } = req.body;
@@ -8142,10 +8213,14 @@ app.post('/api/orders/:id/issues', authenticateToken, async (req, res) => {
     if (orders.length === 0) {
       return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
     }
+    let photoUrl = null;
+    if (req.file) {
+      photoUrl = `/uploads/${req.file.filename}`;
+    }
     const [result] = await pool.query(
-      `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
-      [orderId, req.user.id, req.user.role, String(issue_type).trim(), cause || null, follow_up || null, solution || null]
+      `INSERT INTO order_issues (order_id, reported_by, reported_role, issue_type, cause, follow_up, solution, photo_url, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+      [orderId, req.user.id, req.user.role, String(issue_type).trim(), cause || null, follow_up || null, solution || null, photoUrl]
     );
     const [rows] = await pool.query(
       `SELECT oi.*, rp.name as reported_by_name
@@ -8179,6 +8254,133 @@ app.put('/api/order-issues/:id/resolve', authenticateToken, authorizeRole('admin
   } catch (error) {
     console.error('Resolve order issue error:', error);
     res.status(500).json({ message: 'Terjadi kesalahan saat menyelesaikan kendala' });
+  }
+});
+
+// ========================================
+// REVISI: TAMBAH DP PESANAN ENDPOINTS
+// ========================================
+app.post('/api/orders/:id/dp', authenticateToken, authorizeRole('admin', 'operasional'), upload.single('proof'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const orderId = req.params.id;
+    const rawAmount = req.body.amount;
+    const amount = parseFloat(rawAmount);
+
+    if (isNaN(amount) || amount <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Nominal tambahan DP harus berupa angka lebih dari 0' });
+    }
+
+    const [orders] = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [orderId]);
+    if (orders.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+    }
+
+    const order = orders[0];
+    const finalAmount = parseFloat(order.final_amount) || 0;
+    const currentPayment = parseFloat(order.payment_amount) || 0;
+    const newPaymentAmount = currentPayment + amount;
+
+    let proofUrl = null;
+    if (req.file) {
+      proofUrl = `/uploads/${req.file.filename}`;
+    }
+
+    const paymentDate = req.body.payment_date || new Date().toISOString().slice(0, 10);
+    const notes = req.body.notes || 'Tambah DP';
+
+    // 1. Simpan riwayat penambahan DP
+    await connection.query(
+      `INSERT INTO order_dp_payments (order_id, amount, payment_date, proof_url, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [orderId, amount, paymentDate, proofUrl, notes, req.user.id]
+    );
+
+    // 2. Update orders: payment_amount dan status
+    const newPaymentStatus = newPaymentAmount >= finalAmount ? 'paid' : (order.payment_status === 'paid' ? 'paid' : 'dp');
+    await connection.query(
+      `UPDATE orders SET payment_amount = ?, payment_status = ? WHERE id = ?`,
+      [newPaymentAmount, newPaymentStatus, orderId]
+    );
+
+    // 3. Integrasi Keuangan Otomatis (Neraca & Arus Kas)
+    try {
+      // Neraca: Debit Kas (DP masuk), Kredit Piutang Usaha
+      await connection.query(
+        `INSERT INTO accounting_journal_entries 
+         (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
+         VALUES (?, 'order', ?, ?, 'Kas', 'Piutang Usaha', ?, ?)`,
+        [paymentDate, orderId, `Penerimaan Tambah DP pesanan #${orderId} (${notes})`, amount, req.user.id]
+      );
+
+      // Arus Kas: Operasi -> Penjualan
+      const [cfRes] = await connection.query(
+        `INSERT INTO cash_flow_transactions 
+         (date, type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
+         VALUES (?, 'income', 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', ?, ?, ?, ?)`,
+        [paymentDate, amount, `Penerimaan Tambah DP pesanan #${orderId} - Rp ${amount.toLocaleString('id-ID')}`, orderId, req.user.id]
+      );
+
+      await connection.query(
+        `INSERT INTO cash_flow_edit_history 
+         (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
+         VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', 'created')`,
+        [cfRes.insertId, req.user.id, amount, `Penerimaan Tambah DP pesanan #${orderId}`]
+      );
+    } catch (finErr) {
+      console.error('Error integrating tambah DP to finance:', finErr);
+    }
+
+    // 4. Log riwayat status
+    const [users] = await connection.query('SELECT name FROM users WHERE id = ?', [req.user.id]);
+    const handlerName = users.length > 0 ? users[0].name : 'Admin';
+    await connection.query(
+      'INSERT INTO order_status_logs (order_id, status, handler_id, handler_name, notes, proof_image_url) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        orderId,
+        order.status,
+        req.user.id,
+        handlerName,
+        `Tambah DP: Rp ${amount.toLocaleString('id-ID')} (${notes})`,
+        proofUrl
+      ]
+    );
+
+    await connection.commit();
+
+    const [updatedRows] = await pool.query(
+      'SELECT dp.*, u.name as created_by_name FROM order_dp_payments dp LEFT JOIN users u ON dp.created_by = u.id WHERE dp.order_id = ? ORDER BY dp.payment_date ASC, dp.created_at ASC',
+      [orderId]
+    );
+
+    res.status(201).json({
+      message: 'Pembayaran DP berhasil ditambahkan',
+      payment_amount: newPaymentAmount,
+      payment_status: newPaymentStatus,
+      dp_payments: updatedRows
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add DP error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menambahkan DP' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.get('/api/orders/:id/dp', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT dp.*, u.name as created_by_name FROM order_dp_payments dp LEFT JOIN users u ON dp.created_by = u.id WHERE dp.order_id = ? ORDER BY dp.payment_date ASC, dp.created_at ASC',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Get DP history error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan' });
   }
 });
 

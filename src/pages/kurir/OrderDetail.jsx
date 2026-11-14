@@ -5,7 +5,6 @@ import { formatRupiah, parseDeliveryNotes } from '../../utils/formatHelper';
 import { getImageUrl } from '../../utils/imageHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
-import PackagingStandardsSection from '../../components/PackagingStandardsSection';
 import OrderDeliveryEquipmentSection from '../../components/OrderDeliveryEquipmentSection';
 import OrderIssuesListSection from '../../components/OrderIssuesListSection';
 import ReportIssueBox from '../../components/ReportIssueBox';
@@ -137,6 +136,9 @@ const KurirOrderDetail = () => {
         formData.append('issue_cause', issueData.issue_cause || '');
         formData.append('issue_follow_up', issueData.issue_follow_up || '');
         formData.append('issue_solution', issueData.issue_solution || '');
+        if (issueData.photo) {
+          formData.append('issue_photo', issueData.photo);
+        }
       }
 
       await orderAPI.updateStatus(id, formData);
@@ -208,6 +210,9 @@ const KurirOrderDetail = () => {
         formData.append('issue_cause', issueData.issue_cause || '');
         formData.append('issue_follow_up', issueData.issue_follow_up || '');
         formData.append('issue_solution', issueData.issue_solution || '');
+        if (issueData.photo) {
+          formData.append('issue_photo', issueData.photo);
+        }
       }
 
       if (feedbackData.feedback_type) {
@@ -240,15 +245,18 @@ const KurirOrderDetail = () => {
     }
     try {
       setSubmittingIssue(true);
-      await orderIssuesAPI.create(id, {
-        issue_type: standaloneIssueData.issue_type.trim(),
-        cause: standaloneIssueData.issue_cause || '',
-        follow_up: standaloneIssueData.issue_follow_up || '',
-        solution: standaloneIssueData.issue_solution || '',
-      });
+      const issueForm = new FormData();
+      issueForm.append('issue_type', standaloneIssueData.issue_type.trim());
+      issueForm.append('cause', standaloneIssueData.issue_cause || '');
+      issueForm.append('follow_up', standaloneIssueData.issue_follow_up || '');
+      issueForm.append('solution', standaloneIssueData.issue_solution || '');
+      if (standaloneIssueData.photo) {
+        issueForm.append('photo', standaloneIssueData.photo);
+      }
+      await orderIssuesAPI.create(id, issueForm);
       alert('Kendala berhasil dilaporkan ke dashboard Admin & Operasional');
       setStandaloneIssueChecked(false);
-      setStandaloneIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '' });
+      setStandaloneIssueData({ issue_type: '', issue_cause: '', issue_follow_up: '', issue_solution: '', photo: null, photo_preview: null });
       fetchOrder();
     } catch (error) {
       console.error('Error reporting standalone issue:', error);
@@ -600,9 +608,6 @@ const KurirOrderDetail = () => {
                 </div>
               </div>
             )}
-
-            {/* Standar Pengemasan (Otomatis per Kategori) */}
-            <PackagingStandardsSection order={order} canEdit={false} />
 
             {/* Checklist Perlengkapan Pengantaran (Kurir) */}
             <OrderDeliveryEquipmentSection orderId={id} mode="kurir" />

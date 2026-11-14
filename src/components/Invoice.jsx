@@ -102,11 +102,19 @@ const Invoice = ({ order, items = [], company = {} }) => {
             <p className="text-gray-700">
               Status: <span className="capitalize">{order.payment_status}</span>
             </p>
-            {order.payment_amount != null && (
+            {order.payment_amount != null && Number(order.payment_amount) > 0 && (
               <p className="text-gray-700">
-                Dibayar:{' '}
-                <span className="font-medium">
+                Total DP Dibayar:{' '}
+                <span className="font-semibold text-green-700">
                   Rp {formatRupiah(order.payment_amount)}
+                </span>
+              </p>
+            )}
+            {Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)) > 0 && (
+              <p className="text-gray-700">
+                Sisa Tagihan:{' '}
+                <span className="font-semibold text-red-600">
+                  Rp {formatRupiah(Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)))}
                 </span>
               </p>
             )}
@@ -118,11 +126,6 @@ const Invoice = ({ order, items = [], company = {} }) => {
                 </span>
               </p>
             )}
-            <div className="mt-3 text-sm text-gray-600">
-              <p>Bank: {company.bank_name || 'BRI'}</p>
-              <p>No. Rek: {company.bank_account_number || '3642-01-032854-53-5'}</p>
-              <p>a.n. {company.bank_account_name || 'Muhammad Al Hakim Pamungkas'}</p>
-            </div>
           </div>
         </div>
 
@@ -291,6 +294,36 @@ const Invoice = ({ order, items = [], company = {} }) => {
                 Rp {formatRupiah(order.final_amount)}
               </span>
             </div>
+            {Number(order.payment_amount || 0) > 0 && (
+              <>
+                <div className="flex justify-between py-2 border-b border-gray-300">
+                  <span className="text-gray-700">Total DP Dibayar:</span>
+                  <span className="text-green-700 font-semibold">
+                    - Rp {formatRupiah(order.payment_amount)}
+                  </span>
+                </div>
+                {Array.isArray(order.dp_payments) && order.dp_payments.length > 0 && (
+                  <div className="py-1.5 px-2.5 space-y-1 text-xs text-gray-600 bg-gray-50 rounded border border-gray-200 my-1">
+                    <p className="font-semibold text-gray-700">Rincian Pembayaran DP:</p>
+                    {order.dp_payments.map((dp, idx) => (
+                      <div key={dp.id || idx} className="flex justify-between">
+                        <span>
+                          DP {idx + 1} ({new Date(dp.payment_date || dp.created_at).toLocaleDateString('id-ID')}
+                          {dp.notes ? ` - ${dp.notes}` : ''}):
+                        </span>
+                        <span className="font-medium">Rp {formatRupiah(dp.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-between py-2 border-b-2 border-purple-400 font-bold">
+                  <span className="text-gray-900">Sisa Tagihan:</span>
+                  <span className="text-red-600">
+                    Rp {formatRupiah(Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)))}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

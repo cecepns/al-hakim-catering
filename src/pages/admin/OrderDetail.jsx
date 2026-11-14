@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { orderAPI, orderCostsAPI, inventoryAPI } from '../../utils/api';
+import { orderAPI, orderCostsAPI, inventoryAPI, orderDpAPI } from '../../utils/api';
 import { formatRupiah, parseDeliveryNotes, formatDate } from '../../utils/formatHelper';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
@@ -57,6 +57,48 @@ const AdminOrderDetail = () => {
     feedback_notes: '',
     feedback_image: null,
   });
+
+  const [addDpModalOpen, setAddDpModalOpen] = useState(false);
+  const [submittingAddDp, setSubmittingAddDp] = useState(false);
+  const [addDpData, setAddDpData] = useState({
+    amount: '',
+    payment_date: new Date().toISOString().slice(0, 10),
+    proof: null,
+    notes: '',
+  });
+
+  const handleSaveAddDp = async (e) => {
+    e.preventDefault();
+    const amountVal = parseFloat(addDpData.amount);
+    if (isNaN(amountVal) || amountVal <= 0) {
+      alert('Nominal tambahan DP harus berupa angka lebih dari 0');
+      return;
+    }
+    try {
+      setSubmittingAddDp(true);
+      const formData = new FormData();
+      formData.append('amount', String(amountVal));
+      formData.append('payment_date', addDpData.payment_date);
+      if (addDpData.notes) formData.append('notes', addDpData.notes);
+      if (addDpData.proof) formData.append('proof', addDpData.proof);
+
+      await orderDpAPI.addDp(id, formData);
+      alert('Pembayaran DP berhasil ditambahkan');
+      setAddDpModalOpen(false);
+      setAddDpData({
+        amount: '',
+        payment_date: new Date().toISOString().slice(0, 10),
+        proof: null,
+        notes: '',
+      });
+      fetchOrder();
+    } catch (err) {
+      console.error('Error adding DP:', err);
+      alert(err.response?.data?.message || 'Gagal menambahkan DP');
+    } finally {
+      setSubmittingAddDp(false);
+    }
+  };
 
   const fetchInventory = async () => {
     try {
@@ -205,6 +247,9 @@ const AdminOrderDetail = () => {
         formData.append('issue_cause', issueData.issue_cause || '');
         formData.append('issue_follow_up', issueData.issue_follow_up || '');
         formData.append('issue_solution', issueData.issue_solution || '');
+        if (issueData.photo) {
+          formData.append('issue_photo', issueData.photo);
+        }
       }
 
       if (newStatus === 'selesai' && feedbackData.feedback_type) {
@@ -468,6 +513,60 @@ const AdminOrderDetail = () => {
                       </button>
                     </div>
                   </div>
+
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                    <div>
+                      <span className="text-gray-600 block text-xs">Total DP Masuk:</span>
+                      <span className="font-semibold text-green-700 text-sm">
+                        Rp {formatRupiah(order.payment_amount || 0)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600 block text-xs text-right">Sisa Tagihan:</span>
+                      <span className="font-bold text-red-600 text-sm">
+                        Rp {formatRupiah(Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)))}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setAddDpModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm transition"
+                    >
+                      + Tambah DP
+                    </button>
+                  </div>
+
+                  {Array.isArray(order.dp_payments) && order.dp_payments.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+                      <p className="text-xs font-semibold text-gray-700">Riwayat Tambah DP ({order.dp_payments.length}):</p>
+                      {order.dp_payments.map((dp, idx) => (
+                        <div key={dp.id || idx} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                          <div>
+                            <span className="font-semibold text-gray-800">DP {idx + 1}: Rp {formatRupiah(dp.amount)}</span>
+                            <span className="text-gray-500 ml-1.5">
+                              ({new Date(dp.payment_date || dp.created_at).toLocaleDateString('id-ID')})
+                            </span>
+                            {dp.notes && <span className="text-gray-600 block text-[11px] mt-0.5">{dp.notes}</span>}
+                          </div>
+                          {dp.proof_url && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setViewingImage(dp.proof_url);
+                                setImageViewerOpen(true);
+                              }}
+                              className="text-primary-600 hover:underline font-medium text-xs ml-2"
+                            >
+                              Bukti
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -782,8 +881,8 @@ const AdminOrderDetail = () => {
             {/* MODAL & HPP PESANAN (Halaman 8 & 9 PDF) */}
             <OrderCostManagement orderId={id} onUpdated={fetchOrder} />
 
-            {/* Rekap Perlengkapan Pengantaran */}
-            <OrderDeliveryEquipmentSection orderId={id} mode="readonly" />
+            {/* Rekap Perlengkapan Pengantaran (Editable oleh Admin) */}
+            <OrderDeliveryEquipmentSection orderId={id} mode="admin" />
 
             {/* Daftar Laporan Kendala Pesanan */}
             <OrderIssuesListSection issues={order.issues} canResolve={true} onResolved={fetchOrder} />
@@ -1064,6 +1163,108 @@ const AdminOrderDetail = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Tambah DP (Revisi Klien) */}
+        {addDpModalOpen && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+              <h3 className="text-lg font-bold text-gray-900 mb-1">Tambah Pembayaran DP</h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Catat cicilan/tambahan DP pesanan #{order.id}. Otomatis masuk ke Arus Kas & Neraca serta mengupdate sisa tagihan pada Nota/Faktur.
+              </p>
+
+              <form onSubmit={handleSaveAddDp} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Nominal Tambahan DP (Rp) *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={addDpData.amount}
+                    onChange={(e) => setAddDpData({ ...addDpData, amount: e.target.value })}
+                    placeholder="Contoh: 500000"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Tanggal Pembayaran *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={addDpData.payment_date}
+                    onChange={(e) => setAddDpData({ ...addDpData, payment_date: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Bukti Pembayaran / Transfer (Opsional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setAddDpData({ ...addDpData, proof: e.target.files?.[0] || null })}
+                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    Catatan (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={addDpData.notes}
+                    onChange={(e) => setAddDpData({ ...addDpData, notes: e.target.value })}
+                    placeholder="Contoh: Transfer DP tahap 2 via BRI"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                <div className="p-3 bg-purple-50 rounded-lg text-xs text-purple-900 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Total Tagihan:</span>
+                    <span className="font-semibold">Rp {formatRupiah(order.final_amount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>DP Saat Ini:</span>
+                    <span className="font-semibold">Rp {formatRupiah(order.payment_amount || 0)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-primary-700 pt-1 border-t border-purple-200">
+                    <span>Sisa Tagihan Setelah Ini:</span>
+                    <span>
+                      Rp {formatRupiah(Math.max(0, Number(order.final_amount || 0) - (Number(order.payment_amount || 0) + (Number(addDpData.amount) || 0))))}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setAddDpModalOpen(false)}
+                    disabled={submittingAddDp}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingAddDp || !addDpData.amount}
+                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {submittingAddDp ? 'Menyimpan...' : 'Simpan Tambah DP'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

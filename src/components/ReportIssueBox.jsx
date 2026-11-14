@@ -1,10 +1,30 @@
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Upload, X } from 'lucide-react';
 
 const ReportIssueBox = ({ checked, onCheckedChange, values = {}, onChange }) => {
   const handleField = (field, val) => {
     onChange({
       ...values,
       [field]: val,
+    });
+  };
+
+  const handlePhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const previewUrl = URL.createObjectURL(file);
+      onChange({
+        ...values,
+        photo: file,
+        photo_preview: previewUrl,
+      });
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    onChange({
+      ...values,
+      photo: null,
+      photo_preview: null,
     });
   };
 
@@ -76,6 +96,35 @@ const ReportIssueBox = ({ checked, onCheckedChange, values = {}, onChange }) => 
               placeholder="Solusi atau pencegahan ke depan..."
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Upload Foto Kendala (Opsional)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoChange}
+              className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-white file:mr-3 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200"
+            />
+            {values.photo_preview && (
+              <div className="relative mt-2 inline-block">
+                <img
+                  src={values.photo_preview}
+                  alt="Preview Foto Kendala"
+                  className="w-32 h-32 object-cover rounded-lg border border-amber-300"
+                />
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  className="absolute -top-1.5 -right-1.5 bg-red-600 text-white rounded-full p-0.5 hover:bg-red-700"
+                  title="Hapus Foto"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

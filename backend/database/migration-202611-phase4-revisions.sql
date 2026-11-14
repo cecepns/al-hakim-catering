@@ -71,12 +71,16 @@ CREATE TABLE IF NOT EXISTS `order_issues` (
   `cause` TEXT NULL,
   `follow_up` TEXT NULL,
   `solution` TEXT NULL,
+  `photo_url` VARCHAR(255) NULL,
   `status` ENUM('open', 'resolved') NOT NULL DEFAULT 'open',
   `resolved_by` INT NULL,
   `resolved_at` DATETIME NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- If table already exists, ensure photo_url column exists
+ALTER TABLE `order_issues` ADD COLUMN IF NOT EXISTS `photo_url` VARCHAR(255) NULL AFTER `solution`;
 
 -- 5. Update reviews & complaints untuk mendukung laporan dari staff/kurir saat pesanan selesai
 ALTER TABLE `reviews`
@@ -108,4 +112,18 @@ CREATE TABLE IF NOT EXISTS `daily_role_checklists` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uniq_role_date_user` (`role`, `checklist_date`, `user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 7. Riwayat Tambah DP Pesanan (order_dp_payments)
+CREATE TABLE IF NOT EXISTS `order_dp_payments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `order_id` INT NOT NULL,
+  `amount` DECIMAL(15,2) NOT NULL,
+  `payment_date` DATE NOT NULL,
+  `proof_url` VARCHAR(255) NULL,
+  `notes` TEXT NULL,
+  `created_by` INT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_order_dp_order_id` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 

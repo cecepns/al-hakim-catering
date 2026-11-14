@@ -1,8 +1,14 @@
+import { useState } from 'react';
 import { toast } from 'react-toastify';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { orderIssuesAPI } from '../utils/api';
+import { getImageUrl, handleImageError } from '../utils/imageHelper';
+import ImageViewer from './ImageViewer';
 
 const OrderIssuesListSection = ({ issues = [], canResolve = false, onResolved }) => {
+  const [viewingImage, setViewingImage] = useState(null);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+
   if (!Array.isArray(issues) || issues.length === 0) {
     return null;
   }
@@ -72,6 +78,24 @@ const OrderIssuesListSection = ({ issues = [], canResolve = false, onResolved })
               </p>
             )}
 
+            {issue.photo_url && (
+              <div className="pt-1">
+                <p className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1">
+                  <ImageIcon className="w-3.5 h-3.5 text-amber-600" /> Foto Kendala:
+                </p>
+                <img
+                  src={getImageUrl(issue.photo_url)}
+                  alt="Bukti Kendala"
+                  onError={handleImageError}
+                  className="w-24 h-24 sm:w-32 sm:h-32 object-cover rounded-lg border border-amber-200 cursor-pointer hover:opacity-90 transition"
+                  onClick={() => {
+                    setViewingImage(getImageUrl(issue.photo_url));
+                    setImageViewerOpen(true);
+                  }}
+                />
+              </div>
+            )}
+
             {canResolve && issue.status !== 'resolved' && (
               <div className="pt-1 flex justify-end">
                 <button
@@ -86,6 +110,16 @@ const OrderIssuesListSection = ({ issues = [], canResolve = false, onResolved })
           </div>
         ))}
       </div>
+
+      <ImageViewer
+        imageUrl={viewingImage}
+        isOpen={imageViewerOpen}
+        onClose={() => {
+          setImageViewerOpen(false);
+          setViewingImage(null);
+        }}
+        title="Foto Bukti Kendala"
+      />
     </div>
   );
 };

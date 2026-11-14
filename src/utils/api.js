@@ -285,8 +285,27 @@ export const equipmentAPI = {
 export const orderIssuesAPI = {
   getAll: (params) => api.get('/order-issues', { params }),
   getByOrder: (orderId) => api.get(`/orders/${orderId}/issues`),
-  create: (orderId, data) => api.post(`/orders/${orderId}/issues`, data),
+  create: (orderId, data) => {
+    if (data instanceof FormData) {
+      return api.post(`/orders/${orderId}/issues`, data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post(`/orders/${orderId}/issues`, data);
+  },
   resolve: (issueId, data) => api.put(`/order-issues/${issueId}/resolve`, data || {}),
+};
+
+export const orderDpAPI = {
+  getHistory: (orderId) => api.get(`/orders/${orderId}/dp`),
+  addDp: (orderId, data) => {
+    if (data instanceof FormData) {
+      return api.post(`/orders/${orderId}/dp`, data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
+    return api.post(`/orders/${orderId}/dp`, data);
+  },
 };
 
 export const checklistTemplateAPI = {

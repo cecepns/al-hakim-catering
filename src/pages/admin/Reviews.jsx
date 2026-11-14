@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { AlertTriangle, CheckCircle2, MessageSquareWarning } from 'lucide-react';
 import { orderAPI, orderIssuesAPI } from '../../utils/api';
-import { getImageUrl } from '../../utils/imageHelper';
+import { getImageUrl, handleImageError } from '../../utils/imageHelper';
 import { useAuth } from '../../context/AuthContext';
 import DashboardLayout from '../../components/DashboardLayout';
 import ImageViewer from '../../components/ImageViewer';
@@ -326,7 +326,8 @@ const AdminReviews = () => {
                           <img
                             src={getImageUrl(review.image_url)}
                             alt="Feedback"
-                            className="w-48 h-48 object-cover rounded-lg cursor-pointer border"
+                            onError={handleImageError}
+                            className="w-48 h-48 object-cover rounded-lg cursor-pointer border hover:opacity-90 transition"
                             onClick={() => {
                               setViewerImage(getImageUrl(review.image_url));
                               setViewerOpen(true);
@@ -469,6 +470,22 @@ const AdminReviews = () => {
                           </p>
                         </div>
                       </div>
+
+                      {issue.photo_url && (
+                        <div className="mb-3">
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Bukti Foto Kendala</p>
+                          <img
+                            src={getImageUrl(issue.photo_url)}
+                            alt="Bukti Kendala"
+                            onError={handleImageError}
+                            className="w-36 h-36 object-cover rounded-lg cursor-pointer border hover:opacity-90 transition"
+                            onClick={() => {
+                              setViewerImage(getImageUrl(issue.photo_url));
+                              setViewerOpen(true);
+                            }}
+                          />
+                        </div>
+                      )}
 
                       {issue.status === 'resolved' ? (
                         issue.resolved_by_name && (

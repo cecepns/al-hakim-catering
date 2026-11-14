@@ -13,6 +13,10 @@ const OrderDeliveryEquipmentSection = ({ orderId, mode = 'readonly' }) => {
   // Kurir draft map: { [equipment_id]: { qty_returned, qty_borrowed, notes } }
   const [kurirDraft, setKurirDraft] = useState({});
 
+  // Mode management: allow admin & operasional to also edit/manage equipment
+  const canManage = mode === 'dapur' || mode === 'admin' || mode === 'operasional';
+  const [isEditingBrought, setIsEditingBrought] = useState(mode === 'dapur');
+
   // Quick-add new equipment master item (available for dapur/admin/operasional)
   const [showAddMaster, setShowAddMaster] = useState(false);
   const [newMaster, setNewMaster] = useState({ name: '', unit: 'Pcs', stock: 0 });
@@ -140,6 +144,9 @@ const OrderDeliveryEquipmentSection = ({ orderId, mode = 'readonly' }) => {
         items: itemsPayload,
       });
       toast.success('Checklist perlengkapan dibawa berhasil disimpan');
+      if (mode !== 'dapur') {
+        setIsEditingBrought(false);
+      }
       await fetchOrderEquipment();
     } catch (error) {
       console.error('Error saving dapur equipment:', error);
@@ -272,37 +279,186 @@ const OrderDeliveryEquipmentSection = ({ orderId, mode = 'readonly' }) => {
           <Truck className="w-5 h-5 text-purple-700" />
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {mode === 'dapur'
-                ? 'Checklist Perlengkapan Dibawa Pengantaran'
-                : mode === 'kurir'
+              {mode === 'kurir'
                 ? 'Checklist Perlengkapan Pengantaran (Kurir)'
+                : isEditingBrought || mode === 'dapur'
+                ? 'Checklist Perlengkapan Dibawa Pengantaran'
                 : 'Perlengkapan Pengantaran'}
             </h2>
             <p className="text-xs text-gray-500">
-              {mode === 'dapur'
+              {mode === 'kurir'
+                ? 'Catat peralatan yang kembali dan yang sedang dipinjam pelanggan'
+                : isEditingBrought || mode === 'dapur'
                 ? 'Centang perlengkapan yang dibawa saat pengantaran beserta jumlahnya'
-                : mode === 'kurir'
-                ? 'Catat jumlah peralatan yang kembali saat diterima dan yang masih dipinjam pelanggan'
                 : 'Daftar peralatan yang dibawa saat pengantaran, kembali, dan sedang dipinjam'}
             </p>
           </div>
         </div>
 
-        {mode === 'dapur' && (
-          <button
-            type="button"
-            onClick={() => setShowAddMaster(!showAddMaster)}
-            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-50"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            {showAddMaster ? 'Tutup Tambah Alat' : 'Tambah Alat Baru'}
-          </button>
+        {canManage && (
+          <div className="flex items-center gap-2">
+            {(isEditingBrought || mode === 'dapur') && (
+              <button
+                type="button"
+                onClick={() => setShowAddMaster(!showAddMaster)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-50"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {showAddMaster ? 'Tutup Tambah Alat' : 'Tambah Alat Baru'}
+              </button>
+            )}
+            {mode !== 'dapur' && mode !== 'kurir' && (
+              <button
+                type="button"
+                onClick={() => setIsEditingBrought(!isEditingBrought)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-purple-100 text-purple-800 rounded-lg hover:bg-purple-200 transition"
+              >
+                {isEditingBrought ? 'Lihat Rekap' : 'Kelola / Edit Alat'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       {loading ? (
         <p className="text-sm text-gray-500 py-4">Memuat daftar perlengkapan...</p>
-      ) : mode === 'dapur' ? (
+      ) : mode === 'kurir' ? (
+        orderItems.length === 0 ? (
+          <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-600">
+            Belum ada perlengkapan pengantaran yang dicatat Dapur untuk pesanan ini.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="overflow-x-auto border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-xs uppercase text-gray-600">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Perlengkapan</th>
+                    <th className="px-4 py-3 text-center">Dibawa</th>
+                    <th className="px-4 py-3 text-center">Kembali</th>
+                    <th className="px-4 py-3 text-center">Dipinjam</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {orderItems.map((it) => {
+                    const brought = Number(it.qty_brought) || 0;
+                    const draft = kurirDraft[it.equipment_id] || {
+                      qty_returned: Number(it.qty_returned) || 0,
+                      qty_borrowed: Number(it.qty_borrowed) || 0,
+                    };
+                    const returned = Number(draft.qty_returned) || 0;
+                    const borrowed = Number(draft.qty_borrowed) || 0;
+                    const isAllReturned = returned === brought && borrowed === 0;
+                    const isAllBorrowed = borrowed === brought && returned === 0;
+
+                    return (
+                      <tr key={it.equipment_id} className={borrowed > 0 ? 'bg-amber-50/50' : ''}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-gray-900">{it.equipment_name}</div>
+                          <div className="text-xs text-gray-500">{it.equipment_unit || 'Pcs'}</div>
+                          {it.notes && <p className="text-xs text-gray-500 mt-0.5">{it.notes}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-center font-bold text-gray-900 text-base">
+                          {brought}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleKurirSetStatus(it.equipment_id, brought, 'returned')}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-semibold transition ${
+                                isAllReturned
+                                  ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                                  : returned > 0
+                                  ? 'bg-green-50 text-green-700 border-green-400'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-green-50'
+                              }`}
+                            >
+                              {isAllReturned || returned > 0 ? (
+                                <CheckSquare className="w-4 h-4 text-current" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                              <span>{isAllReturned ? `✅ ${brought}` : returned > 0 ? `✅ ${returned}` : '⬜ 0'}</span>
+                            </button>
+                            {brought > 1 && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <span>Atur:</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={brought}
+                                  value={returned}
+                                  onChange={(e) =>
+                                    handleKurirReturnedChange(it.equipment_id, brought, e.target.value)
+                                  }
+                                  className="w-12 px-1 py-0.5 text-center border border-gray-300 rounded text-xs"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex flex-col items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleKurirSetStatus(it.equipment_id, brought, 'borrowed')}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-semibold transition ${
+                                isAllBorrowed
+                                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                                  : borrowed > 0
+                                  ? 'bg-amber-50 text-amber-700 border-amber-400'
+                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-amber-50'
+                              }`}
+                            >
+                              {isAllBorrowed || borrowed > 0 ? (
+                                <CheckSquare className="w-4 h-4 text-current" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-400" />
+                              )}
+                              <span>{isAllBorrowed ? `✅ ${brought}` : borrowed > 0 ? `✅ ${borrowed}` : '⬜ 0'}</span>
+                            </button>
+                            {brought > 1 && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <span>Atur:</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={brought}
+                                  value={borrowed}
+                                  onChange={(e) =>
+                                    handleKurirBorrowedChange(it.equipment_id, brought, e.target.value)
+                                  }
+                                  className="w-12 px-1 py-0.5 text-center border border-gray-300 rounded text-xs"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-gray-500">
+                Centang &ldquo;Kembali&rdquo; atau &ldquo;Dipinjam&rdquo;. Peralatan yang dipinjam otomatis dicatat hingga kembali.
+              </p>
+              <button
+                type="button"
+                onClick={handleSaveKurir}
+                disabled={saving}
+                className="inline-flex items-center gap-2 bg-purple-700 text-white px-5 py-2.5 rounded-lg hover:bg-purple-800 text-sm font-medium disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {saving ? 'Menyimpan...' : 'Simpan Checklist Kurir'}
+              </button>
+            </div>
+          </div>
+        )
+      ) : isEditingBrought || mode === 'dapur' ? (
         <div className="space-y-4">
           {showAddMaster && (
             <form
@@ -406,7 +562,16 @@ const OrderDeliveryEquipmentSection = ({ orderId, mode = 'readonly' }) => {
             </div>
           )}
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {mode !== 'dapur' && (
+              <button
+                type="button"
+                onClick={() => setIsEditingBrought(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50"
+              >
+                Batal
+              </button>
+            )}
             <button
               type="button"
               onClick={handleSaveDapur}
@@ -418,133 +583,19 @@ const OrderDeliveryEquipmentSection = ({ orderId, mode = 'readonly' }) => {
             </button>
           </div>
         </div>
-      ) : mode === 'kurir' ? (
-        orderItems.length === 0 ? (
-          <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-600">
-            Belum ada perlengkapan pengantaran yang dicatat Dapur untuk pesanan ini.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-600">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Perlengkapan</th>
-                    <th className="px-4 py-3 text-center">Dibawa</th>
-                    <th className="px-4 py-3 text-center">Kembali</th>
-                    <th className="px-4 py-3 text-center">Dipinjam</th>
-                    <th className="px-4 py-3 text-center">Aksi Cepat</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {orderItems.map((it) => {
-                    const brought = Number(it.qty_brought) || 0;
-                    const draft = kurirDraft[it.equipment_id] || {
-                      qty_returned: Number(it.qty_returned) || 0,
-                      qty_borrowed: Number(it.qty_borrowed) || 0,
-                    };
-                    const returned = Number(draft.qty_returned) || 0;
-                    const borrowed = Number(draft.qty_borrowed) || 0;
-                    return (
-                      <tr key={it.equipment_id} className={borrowed > 0 ? 'bg-amber-50/50' : ''}>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">{it.equipment_name}</div>
-                          <div className="text-xs text-gray-500">{it.equipment_unit || 'Pcs'}</div>
-                        </td>
-                        <td className="px-4 py-3 text-center font-semibold text-gray-900">
-                          {brought}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="inline-flex items-center gap-1.5">
-                            {returned > 0 ? (
-                              <CheckSquare className="w-4 h-4 text-green-600 flex-shrink-0" />
-                            ) : (
-                              <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            )}
-                            <input
-                              type="number"
-                              min="0"
-                              max={brought}
-                              value={returned}
-                              onChange={(e) =>
-                                handleKurirReturnedChange(it.equipment_id, brought, e.target.value)
-                              }
-                              className="w-16 px-2 py-1 text-center border border-gray-300 rounded text-sm"
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="inline-flex items-center gap-1.5">
-                            {borrowed > 0 ? (
-                              <CheckSquare className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                            ) : (
-                              <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            )}
-                            <input
-                              type="number"
-                              min="0"
-                              max={brought}
-                              value={borrowed}
-                              onChange={(e) =>
-                                handleKurirBorrowedChange(it.equipment_id, brought, e.target.value)
-                              }
-                              className="w-16 px-2 py-1 text-center border border-gray-300 rounded text-sm"
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          <div className="inline-flex gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleKurirSetStatus(it.equipment_id, brought, 'returned')}
-                              className={`px-2 py-1 text-xs rounded border ${
-                                returned === brought && borrowed === 0
-                                  ? 'bg-green-600 text-white border-green-600'
-                                  : 'bg-white text-green-700 border-green-300 hover:bg-green-50'
-                              }`}
-                            >
-                              Kembali Semua
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleKurirSetStatus(it.equipment_id, brought, 'borrowed')}
-                              className={`px-2 py-1 text-xs rounded border ${
-                                borrowed === brought && returned === 0
-                                  ? 'bg-amber-600 text-white border-amber-600'
-                                  : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
-                              }`}
-                            >
-                              Dipinjam
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-gray-500">
-                Peralatan berstatus &ldquo;Dipinjam&rdquo; otomatis masuk ke Rekap Peralatan Dipinjam hingga dikembalikan.
-              </p>
-              <button
-                type="button"
-                onClick={handleSaveKurir}
-                disabled={saving}
-                className="inline-flex items-center gap-2 bg-purple-700 text-white px-5 py-2.5 rounded-lg hover:bg-purple-800 text-sm font-medium disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? 'Menyimpan...' : 'Simpan Checklist Kurir'}
-              </button>
-            </div>
-          </div>
-        )
       ) : orderItems.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          Belum ada perlengkapan pengantaran yang dicatat untuk pesanan ini.
-        </p>
+        <div className="p-4 bg-gray-50 rounded-lg text-sm text-gray-600 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <span>Belum ada perlengkapan pengantaran yang dicatat untuk pesanan ini.</span>
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setIsEditingBrought(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-purple-700 text-white rounded-lg hover:bg-purple-800 transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> + Atur Perlengkapan Dibawa
+            </button>
+          )}
+        </div>
       ) : (
         <div className="overflow-x-auto border rounded-lg">
           <table className="w-full text-sm">
