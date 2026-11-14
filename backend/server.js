@@ -2494,6 +2494,43 @@ app.put('/api/reviews/:id/resolve', authenticateToken, authorizeRole('admin', 'o
   }
 });
 
+// Delete review or complaint
+app.delete('/api/reviews/:id', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const type = (req.query.type || req.body?.type || '').toLowerCase();
+
+    if (type === 'complain') {
+      const [result] = await pool.query('DELETE FROM complaints WHERE id = ?', [req.params.id]);
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Komplain tidak ditemukan' });
+      }
+      return res.json({ message: 'Komplain berhasil dihapus' });
+    } else {
+      const [result] = await pool.query('DELETE FROM reviews WHERE id = ?', [req.params.id]);
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Review tidak ditemukan' });
+      }
+      return res.json({ message: 'Review berhasil dihapus' });
+    }
+  } catch (error) {
+    console.error('Delete review/complain error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus data' });
+  }
+});
+
+app.delete('/api/complaints/:id', authenticateToken, authorizeRole('admin', 'operasional'), async (req, res) => {
+  try {
+    const [result] = await pool.query('DELETE FROM complaints WHERE id = ?', [req.params.id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Komplain tidak ditemukan' });
+    }
+    res.json({ message: 'Komplain berhasil dihapus' });
+  } catch (error) {
+    console.error('Delete complaint error:', error);
+    res.status(500).json({ message: 'Terjadi kesalahan saat menghapus komplain' });
+  }
+});
+
 // Submit Review or Complain from Staff / Order Completion Flow (Revisi 7)
 app.post('/api/orders/:id/feedback', authenticateToken, upload.single('image'), async (req, res) => {
   try {

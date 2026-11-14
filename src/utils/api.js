@@ -106,6 +106,7 @@ export const orderAPI = {
   // Reviews
   getReviews: (params) => api.get('/reviews', { params }),
   resolveReview: (id, type) => api.put(`/reviews/${id}/resolve`, { type }),
+  deleteReview: (id, type) => api.delete(`/reviews/${id}`, { params: { type } }),
 };
 
 export const voucherAPI = {

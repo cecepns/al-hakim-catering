@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { AlertTriangle, CheckCircle2, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, MessageSquareWarning, Trash2 } from 'lucide-react';
 import { orderAPI, orderIssuesAPI } from '../../utils/api';
 import { getImageUrl, handleImageError } from '../../utils/imageHelper';
 import { useAuth } from '../../context/AuthContext';
@@ -73,6 +73,23 @@ const AdminReviews = () => {
     } catch (error) {
       console.error('Error resolving review:', error);
       toast.error('Gagal menandai feedback');
+    }
+  };
+
+  const handleDelete = async (review) => {
+    const isComplain = review.type === 'complain';
+    const label = isComplain ? 'komplain' : 'review';
+    if (!window.confirm(`Yakin ingin menghapus ${label} untuk Pesanan #${review.order_id}? Data yang dihapus tidak dapat dikembalikan.`)) {
+      return;
+    }
+
+    try {
+      await orderAPI.deleteReview(review.id, review.type);
+      toast.success(`${isComplain ? 'Komplain' : 'Review'} berhasil dihapus`);
+      fetchReviews();
+    } catch (error) {
+      console.error(`Error deleting ${label}:`, error);
+      toast.error(error.response?.data?.message || `Gagal menghapus ${label}`);
     }
   };
 
@@ -336,16 +353,47 @@ const AdminReviews = () => {
                         </div>
                       )}
 
-                      {!review.resolved && (
-                        <div className="flex justify-end">
+                      <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
+                        <div>
+                          {review.type === 'complain' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(review)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border border-red-200 rounded-lg text-xs font-semibold transition"
+                              title="Hapus Komplain"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Hapus Komplain
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(review)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-600 border border-gray-200 rounded-lg text-xs font-semibold transition"
+                              title="Hapus Review"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Hapus
+                            </button>
+                          )}
+                        </div>
+
+                        {!review.resolved ? (
                           <button
+                            type="button"
                             onClick={() => handleResolve(review)}
-                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs font-semibold shadow-sm transition"
                           >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
                             Tandai Selesai
                           </button>
-                        </div>
-                      )}
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-700 font-medium bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+                            <CheckCircle2 className="w-3 h-3 text-green-600" />
+                            Telah Ditangani
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
