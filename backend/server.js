@@ -822,7 +822,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ message: 'Token tidak ditemukan' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET || "alhakim", (err, user) => {
     if (err) {
       return res.status(403).json({ message: 'Token tidak valid' });
     }
@@ -858,7 +858,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     const token = jwt.sign(
       { id: result.insertId, email, role: 'pembeli' },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || "alhakim",
       { expiresIn: '7d' }
     );
 
@@ -898,7 +898,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || "alhakim",
       { expiresIn: '7d' }
     );
 
@@ -2914,7 +2914,7 @@ app.get('/api/vouchers', async (req, res) => {
 
     if (token) {
       try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "alhakim");
         isAdmin = decoded.role === 'admin';
       } catch {
         // Token invalid, treat as regular user
