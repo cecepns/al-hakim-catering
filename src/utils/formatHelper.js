@@ -115,12 +115,21 @@ const formatDeliveryNotesObject = (notes, includeDetails = false) => {
   }
   
   if (notes.event_date) {
-    const eventDate = new Date(notes.event_date);
-    const formattedDate = eventDate.toLocaleDateString('id-ID', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
+    let eventDate;
+    if (typeof notes.event_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(notes.event_date.trim())) {
+      const [year, month, day] = notes.event_date.trim().split('-').map(Number);
+      eventDate = new Date(year, month - 1, day);
+    } else {
+      eventDate = new Date(notes.event_date);
+    }
+    const formattedDate = Number.isNaN(eventDate.getTime())
+      ? notes.event_date
+      : eventDate.toLocaleDateString('id-ID', {
+          weekday: 'long',
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+        });
     parts.push(`Tanggal Acara: ${formattedDate}`);
   }
   

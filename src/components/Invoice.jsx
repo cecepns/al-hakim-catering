@@ -102,22 +102,6 @@ const Invoice = ({ order, items = [], company = {} }) => {
             <p className="text-gray-700">
               Status: <span className="capitalize">{order.payment_status}</span>
             </p>
-            {order.payment_amount != null && Number(order.payment_amount) > 0 && (
-              <p className="text-gray-700">
-                Total DP Dibayar:{' '}
-                <span className="font-semibold text-green-700">
-                  Rp {formatRupiah(order.payment_amount)}
-                </span>
-              </p>
-            )}
-            {Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)) > 0 && (
-              <p className="text-gray-700">
-                Sisa Tagihan:{' '}
-                <span className="font-semibold text-red-600">
-                  Rp {formatRupiah(Math.max(0, Number(order.final_amount || 0) - Number(order.payment_amount || 0)))}
-                </span>
-              </p>
-            )}
             {marginAmount > 0 && (
               <p className="text-gray-700">
                 Margin Marketing:{' '}

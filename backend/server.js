@@ -2267,9 +2267,13 @@ app.put('/api/orders/:id/status', authenticateToken, upload.fields([
               }
             }
           } else if (method === 'cod') {
+            const paidSoFar = parseFloat(o.payment_amount) || 0;
+            const remaining = Math.max(0, finalTotal - paidSoFar);
             const conn = await pool.getConnection();
             try {
-              await recordOrderCodSettlement(conn, o.id, finalTotal, req.user.id);
+              if (remaining > 0) {
+                await recordOrderCodSettlement(conn, o.id, remaining, req.user.id);
+              }
               await conn.query('UPDATE orders SET payment_status = "paid" WHERE id = ?', [o.id]);
             } finally {
               conn.release();
@@ -3508,11 +3512,15 @@ app.put('/api/admin/orders/:id/payment-status', authenticateToken, authorizeRole
           }
         }
       } else if (method === 'cod') {
-        const connection = await pool.getConnection();
-        try {
-          await recordOrderCodSettlement(connection, id, finalAmount, req.user.id);
-        } finally {
-          connection.release();
+        const paidSoFar = parseFloat(order.payment_amount) || 0;
+        const remaining = Math.max(0, finalAmount - paidSoFar);
+        if (remaining > 0) {
+          const connection = await pool.getConnection();
+          try {
+            await recordOrderCodSettlement(connection, id, remaining, req.user.id);
+          } finally {
+            connection.release();
+          }
         }
       }
     }
@@ -8350,7 +8358,7 @@ app.post('/api/orders/:id/dp', authenticateToken, authorizeRole('admin', 'operas
     );
 
     // 2. Update orders: payment_amount dan status
-    const newPaymentStatus = newPaymentAmount >= finalAmount ? 'paid' : (order.payment_status === 'paid' ? 'paid' : 'dp');
+    const newPaymentStatus = newPaymentAmount >= finalAmount ? 'paid' : (order.payment_status === 'paid' ? 'paid' : 'partial');
     await connection.query(
       `UPDATE orders SET payment_amount = ?, payment_status = ? WHERE id = ?`,
       [newPaymentAmount, newPaymentStatus, orderId]
@@ -8358,27 +8366,29 @@ app.post('/api/orders/:id/dp', authenticateToken, authorizeRole('admin', 'operas
 
     // 3. Integrasi Keuangan Otomatis (Neraca & Arus Kas)
     try {
+      const cfDescription = `Penerimaan Tambah DP pesanan #${orderId}${notes ? ` (${notes})` : ''}`;
+
       // Neraca: Debit Kas (DP masuk), Kredit Piutang Usaha
       await connection.query(
         `INSERT INTO accounting_journal_entries 
          (entry_date, reference_type, reference_id, description, debit_account, credit_account, amount, created_by) 
          VALUES (?, 'order', ?, ?, 'Kas', 'Piutang Usaha', ?, ?)`,
-        [paymentDate, orderId, `Penerimaan Tambah DP pesanan #${orderId} (${notes})`, amount, req.user.id]
+        [paymentDate, orderId, cfDescription, amount, req.user.id]
       );
 
       // Arus Kas: Operasi -> Penjualan
       const [cfRes] = await connection.query(
         `INSERT INTO cash_flow_transactions 
-         (date, type, activity_category, sub_category, debit_account, credit_account, amount, description, order_id, created_by) 
-         VALUES (?, 'income', 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', ?, ?, ?, ?)`,
-        [paymentDate, amount, `Penerimaan Tambah DP pesanan #${orderId} - Rp ${amount.toLocaleString('id-ID')}`, orderId, req.user.id]
+         (type, activity_category, sub_category, debit_account, credit_account, amount, description, proof_image_url, order_id, created_by) 
+         VALUES ('income', 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', ?, ?, ?, ?, ?)`,
+        [amount, cfDescription, proofUrl, orderId, req.user.id]
       );
 
       await connection.query(
         `INSERT INTO cash_flow_edit_history 
          (transaction_id, changed_by, new_type, new_amount, new_description, new_activity_category, new_sub_category, new_debit_account, new_credit_account, change_type) 
          VALUES (?, ?, 'income', ?, ?, 'operasi', 'Penjualan', 'Kas', 'Piutang Usaha', 'created')`,
-        [cfRes.insertId, req.user.id, amount, `Penerimaan Tambah DP pesanan #${orderId}`]
+        [cfRes.insertId, req.user.id, amount, cfDescription]
       );
     } catch (finErr) {
       console.error('Error integrating tambah DP to finance:', finErr);
