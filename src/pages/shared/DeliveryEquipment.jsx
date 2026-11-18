@@ -44,10 +44,14 @@ const DeliveryEquipment = ({ role: propRole }) => {
   // Recap state
   const [recapData, setRecapData] = useState({
     brought: [],
+    in_delivery: [],
     borrowed: [],
+    returned: [],
     summary: {
       total_orders_with_equipment: 0,
+      total_history_orders: 0,
       total_brought_qty: 0,
+      total_returned_qty: 0,
       total_borrowed_qty: 0,
       total_borrowed_items: 0,
     },
@@ -173,19 +177,25 @@ const DeliveryEquipment = ({ role: propRole }) => {
   };
 
   const handleMarkReturned = async (row) => {
+    const qtyToReturn =
+      Number(row.qty_borrowed) > 0
+        ? Number(row.qty_borrowed)
+        : Math.max(0, Number(row.qty_brought || 0) - Number(row.qty_returned || 0));
+    if (qtyToReturn <= 0) return;
+
     if (
       !window.confirm(
-        `Tandai ${row.qty_borrowed} ${row.equipment_unit || ''} ${row.equipment_name} untuk Pesanan #${row.order_id} (${row.customer_name}) sudah kembali?`
+        `Tandai ${qtyToReturn} ${row.equipment_unit || ''} ${row.equipment_name} untuk Pesanan #${row.order_id} (${row.customer_name}) sudah kembali?`
       )
     ) {
       return;
     }
     try {
       await equipmentAPI.markReturned(row.order_id, row.id, {
-        return_qty: row.qty_borrowed,
+        return_qty: qtyToReturn,
       });
       toast.success('Pengembalian peralatan berhasil dicatat');
-      await fetchRecap();
+      await Promise.all([fetchRecap(), fetchCatalog()]);
     } catch (error) {
       console.error('Error marking equipment returned:', error);
       toast.error(error.response?.data?.message || 'Gagal mencatat pengembalian');
@@ -222,6 +232,26 @@ const DeliveryEquipment = ({ role: propRole }) => {
 
   const borrowedRows = filterRecapRows(recapData.borrowed || []);
   const broughtRows = filterRecapRows(recapData.brought || []);
+  const inDeliveryRows = filterRecapRows(
+    recapData.in_delivery ||
+      (recapData.brought || []).filter(
+        (r) => Math.max(0, Number(r.qty_brought || 0) - Number(r.qty_returned || 0) - Number(r.qty_borrowed || 0)) > 0
+      )
+  );
+  const returnedRows = filterRecapRows(
+    recapData.returned ||
+      (recapData.brought || []).filter(
+        (r) => Number(r.qty_brought || 0) > 0 && Number(r.qty_returned || 0) >= Number(r.qty_brought || 0) && Number(r.qty_borrowed || 0) === 0
+      )
+  );
+  const displayedBroughtRows =
+    recapFilter === 'in_delivery'
+      ? inDeliveryRows
+      : recapFilter === 'returned'
+      ? returnedRows
+      : broughtRows;
+  const activeRecapCount =
+    (recapData.in_delivery || []).length + (recapData.borrowed || []).length;
   const canDeleteCatalog = ['admin', 'operasional', 'dapur'].includes(effectiveRole);
 
   return (
@@ -252,19 +282,29 @@ const DeliveryEquipment = ({ role: propRole }) => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white rounded-xl shadow p-5 border-l-4 border-purple-600">
             <p className="text-xs font-medium text-gray-500 uppercase">
-              Total Pesanan Memakai Alat
+              Pesanan Memakai Alat (Aktif)
             </p>
             <p className="text-2xl font-bold text-gray-900 mt-1">
               {recapData.summary?.total_orders_with_equipment || 0} Pesanan
             </p>
+            {(recapData.summary?.total_history_orders || 0) > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Total riwayat: {recapData.summary.total_history_orders} pesanan
+              </p>
+            )}
           </div>
           <div className="bg-white rounded-xl shadow p-5 border-l-4 border-blue-600">
             <p className="text-xs font-medium text-gray-500 uppercase">
-              Total Barang Dibawa Pengantaran
+              Sedang Dibawa Pengantaran
             </p>
             <p className="text-2xl font-bold text-gray-900 mt-1">
               {recapData.summary?.total_brought_qty || 0} Unit
             </p>
+            {(recapData.summary?.total_returned_qty || 0) > 0 && (
+              <p className="text-xs text-green-700 mt-1">
+                Sudah kembali: {recapData.summary.total_returned_qty} unit
+              </p>
+            )}
           </div>
           <div className="bg-white rounded-xl shadow p-5 border-l-4 border-amber-500">
             <p className="text-xs font-medium text-gray-500 uppercase">
@@ -288,7 +328,7 @@ const DeliveryEquipment = ({ role: propRole }) => {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              Rekap Peralatan ({(recapData.brought || []).length})
+              Rekap Peralatan ({activeRecapCount} aktif)
             </button>
             <button
               type="button"
@@ -355,51 +395,72 @@ const DeliveryEquipment = ({ role: propRole }) => {
                       <th className="px-4 py-3 text-left">Nama Peralatan</th>
                       <th className="px-4 py-3 text-center">Satuan</th>
                       <th className="px-4 py-3 text-center">Stok Master</th>
+                      <th className="px-4 py-3 text-center">Di Luar</th>
+                      <th className="px-4 py-3 text-center">Tersedia</th>
                       <th className="px-4 py-3 text-left">Keterangan</th>
                       <th className="px-4 py-3 text-center">Status</th>
                       <th className="px-4 py-3 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {filteredCatalog.map((item) => (
-                      <tr key={item.id} className={!item.is_active ? 'bg-gray-50 text-gray-400' : ''}>
-                        <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
-                        <td className="px-4 py-3 text-center">{item.unit || 'Pcs'}</td>
-                        <td className="px-4 py-3 text-center font-semibold">{item.stock}</td>
-                        <td className="px-4 py-3 text-gray-600">{item.description || '-'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 text-xs rounded-full font-medium ${
-                              item.is_active
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-gray-200 text-gray-600'
-                            }`}
-                          >
-                            {item.is_active ? 'Aktif' : 'Nonaktif'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          <div className="inline-flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(item)}
-                              className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900 px-2 py-1 border border-purple-200 rounded"
+                    {filteredCatalog.map((item) => {
+                      const qtyOut = Number(item.qty_out || 0);
+                      const qtyAvailable =
+                        item.qty_available !== undefined
+                          ? Number(item.qty_available)
+                          : Math.max(0, Number(item.stock || 0) - qtyOut);
+                      return (
+                        <tr key={item.id} className={!item.is_active ? 'bg-gray-50 text-gray-400' : ''}>
+                          <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
+                          <td className="px-4 py-3 text-center">{item.unit || 'Pcs'}</td>
+                          <td className="px-4 py-3 text-center font-semibold">{item.stock}</td>
+                          <td className="px-4 py-3 text-center">
+                            {qtyOut > 0 ? (
+                              <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-semibold">
+                                {qtyOut}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center font-semibold text-green-700">
+                            {qtyAvailable}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">{item.description || '-'}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                                item.is_active
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-200 text-gray-600'
+                              }`}
                             >
-                              <Edit3 className="w-3.5 h-3.5" /> Edit
-                            </button>
-                            {canDeleteCatalog && (
+                              {item.is_active ? 'Aktif' : 'Nonaktif'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
+                            <div className="inline-flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => handleDeleteEquipment(item)}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-800 px-2 py-1 border border-red-200 rounded"
+                                onClick={() => openEditModal(item)}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 hover:text-purple-900 px-2 py-1 border border-purple-200 rounded"
                               >
-                                <Trash2 className="w-3.5 h-3.5" /> Hapus
+                                <Edit3 className="w-3.5 h-3.5" /> Edit
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                              {canDeleteCatalog && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteEquipment(item)}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-red-600 hover:text-red-800 px-2 py-1 border border-red-200 rounded"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Hapus
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -411,8 +472,9 @@ const DeliveryEquipment = ({ role: propRole }) => {
             <div className="flex flex-wrap gap-2">
               {[
                 { key: 'all', label: 'Tampilkan Semua' },
+                { key: 'in_delivery', label: `Sedang Dibawa (${inDeliveryRows.length})` },
                 { key: 'borrowed', label: `Barang Dipinjam (${borrowedRows.length})` },
-                { key: 'brought', label: `Barang Dibawa Pengantaran (${broughtRows.length})` },
+                { key: 'returned', label: `Sudah Kembali (${returnedRows.length})` },
               ].map((pill) => (
                 <button
                   key={pill.key}
@@ -526,19 +588,27 @@ const DeliveryEquipment = ({ role: propRole }) => {
                 )}
 
                 {/* Section 2: Daftar Barang yang Dibawa Pengantaran */}
-                {(recapFilter === 'all' || recapFilter === 'brought') && (
+                {(recapFilter === 'all' || recapFilter === 'in_delivery' || recapFilter === 'returned') && (
                   <div className="bg-white rounded-xl shadow p-6 space-y-4">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                         <Truck className="w-5 h-5 text-purple-700" />
-                        Daftar Barang yang Dibawa Pengantaran
+                        {recapFilter === 'in_delivery'
+                          ? 'Daftar Barang Sedang Dibawa Pengantaran'
+                          : recapFilter === 'returned'
+                          ? 'Riwayat Barang Sudah Kembali'
+                          : 'Daftar Barang yang Dibawa Pengantaran'}
                       </h2>
-                      <span className="text-xs text-gray-500">{broughtRows.length} data tercatat</span>
+                      <span className="text-xs text-gray-500">{displayedBroughtRows.length} data tercatat</span>
                     </div>
 
-                    {broughtRows.length === 0 ? (
+                    {displayedBroughtRows.length === 0 ? (
                       <p className="text-sm text-gray-500 py-4">
-                        Belum ada data barang yang dibawa pengantaran.
+                        {recapFilter === 'in_delivery'
+                          ? 'Tidak ada barang yang sedang dibawa pengantaran (semua sudah kembali atau tercatat dipinjam).'
+                          : recapFilter === 'returned'
+                          ? 'Belum ada riwayat barang yang kembali.'
+                          : 'Belum ada data barang yang dibawa pengantaran.'}
                       </p>
                     ) : (
                       <div className="overflow-x-auto border rounded-lg">
@@ -552,60 +622,80 @@ const DeliveryEquipment = ({ role: propRole }) => {
                               <th className="px-4 py-3 text-center">Kembali</th>
                               <th className="px-4 py-3 text-center">Dipinjam</th>
                               <th className="px-4 py-3 text-center">Status</th>
+                              <th className="px-4 py-3 text-center">Aksi</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {broughtRows.map((row) => (
-                              <tr key={row.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-3 whitespace-nowrap">
-                                  <Link
-                                    to={`${orderDetailBase}/${row.order_id}`}
-                                    className="font-semibold text-purple-700 hover:underline"
-                                  >
-                                    #{row.order_id}
-                                  </Link>
-                                  <p className="text-xs text-gray-500 capitalize">
-                                    {row.order_status?.replace('_', ' ')}
-                                  </p>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="font-medium text-gray-900">{row.customer_name}</div>
-                                  {row.guest_event_date && (
-                                    <div className="text-xs text-gray-500">
-                                      Acara: {new Date(row.guest_event_date).toLocaleDateString('id-ID')}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-4 py-3 font-medium text-gray-900">
-                                  {row.equipment_name}{' '}
-                                  <span className="text-xs text-gray-500 font-normal">
-                                    ({row.equipment_unit || 'Pcs'})
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-center font-semibold">{row.qty_brought}</td>
-                                <td className="px-4 py-3 text-center text-green-700 font-medium">
-                                  {row.qty_returned}
-                                </td>
-                                <td className="px-4 py-3 text-center text-amber-700 font-medium">
-                                  {row.qty_borrowed}
-                                </td>
-                                <td className="px-4 py-3 text-center">
-                                  {Number(row.qty_borrowed) > 0 ? (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
-                                      Dipinjam ({row.qty_borrowed})
+                            {displayedBroughtRows.map((row) => {
+                              const unreturnedQty = Math.max(
+                                0,
+                                Number(row.qty_brought || 0) - Number(row.qty_returned || 0)
+                              );
+                              return (
+                                <tr key={row.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-3 whitespace-nowrap">
+                                    <Link
+                                      to={`${orderDetailBase}/${row.order_id}`}
+                                      className="font-semibold text-purple-700 hover:underline"
+                                    >
+                                      #{row.order_id}
+                                    </Link>
+                                    <p className="text-xs text-gray-500 capitalize">
+                                      {row.order_status?.replace('_', ' ')}
+                                    </p>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="font-medium text-gray-900">{row.customer_name}</div>
+                                    {row.guest_event_date && (
+                                      <div className="text-xs text-gray-500">
+                                        Acara: {new Date(row.guest_event_date).toLocaleDateString('id-ID')}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 font-medium text-gray-900">
+                                    {row.equipment_name}{' '}
+                                    <span className="text-xs text-gray-500 font-normal">
+                                      ({row.equipment_unit || 'Pcs'})
                                     </span>
-                                  ) : Number(row.qty_returned) > 0 ? (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800 font-medium">
-                                      Kembali
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 font-medium">
-                                      Dalam Proses
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                  <td className="px-4 py-3 text-center font-semibold">{row.qty_brought}</td>
+                                  <td className="px-4 py-3 text-center text-green-700 font-medium">
+                                    {row.qty_returned}
+                                  </td>
+                                  <td className="px-4 py-3 text-center text-amber-700 font-medium">
+                                    {row.qty_borrowed}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    {Number(row.qty_borrowed) > 0 ? (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
+                                        Dipinjam ({row.qty_borrowed})
+                                      </span>
+                                    ) : unreturnedQty === 0 && Number(row.qty_returned) > 0 ? (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800 font-medium">
+                                        Kembali
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 font-medium">
+                                        Sedang Dibawa ({unreturnedQty})
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-center whitespace-nowrap">
+                                    {unreturnedQty > 0 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleMarkReturned(row)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" /> Tandai Kembali
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs text-green-700 font-medium">Selesai</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

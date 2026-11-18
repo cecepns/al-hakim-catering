@@ -7912,10 +7912,18 @@ app.put('/api/packaging-standards/:category', authenticateToken, authorizeRole('
 app.get('/api/equipment', authenticateToken, async (req, res) => {
   try {
     const includeInactive = req.query.include_inactive === 'true';
+    const whereClause = includeInactive ? '' : 'WHERE dei.is_active = 1';
     const [rows] = await pool.query(
-      includeInactive
-        ? 'SELECT * FROM delivery_equipment_items ORDER BY name ASC'
-        : 'SELECT * FROM delivery_equipment_items WHERE is_active = 1 ORDER BY name ASC'
+      `SELECT dei.*,
+              COALESCE(SUM(GREATEST(0, ode.qty_brought - ode.qty_returned - ode.qty_borrowed)), 0) as qty_in_delivery,
+              COALESCE(SUM(ode.qty_borrowed), 0) as qty_borrowed,
+              COALESCE(SUM(GREATEST(0, ode.qty_brought - ode.qty_returned)), 0) as qty_out,
+              GREATEST(0, dei.stock - COALESCE(SUM(GREATEST(0, ode.qty_brought - ode.qty_returned)), 0)) as qty_available
+       FROM delivery_equipment_items dei
+       LEFT JOIN order_delivery_equipment ode ON ode.equipment_id = dei.id
+       ${whereClause}
+       GROUP BY dei.id
+       ORDER BY dei.name ASC`
     );
     res.json(rows);
   } catch (error) {
@@ -8002,20 +8010,49 @@ app.get('/api/equipment/recap', authenticateToken, authorizeRole('admin', 'opera
        JOIN orders o ON ode.order_id = o.id
        JOIN users u ON o.user_id = u.id
        WHERE ode.qty_brought > 0 OR ode.qty_borrowed > 0
-       ORDER BY ode.qty_borrowed DESC, ode.updated_at DESC`
+       ORDER BY ode.qty_borrowed DESC, (ode.qty_brought - ode.qty_returned) DESC, ode.updated_at DESC`
     );
 
-    const brought = rows.filter(r => r.qty_brought > 0);
-    const borrowed = rows.filter(r => r.qty_borrowed > 0);
+    const enrichedRows = rows.map(r => {
+      const qtyBrought = Number(r.qty_brought) || 0;
+      const qtyReturned = Number(r.qty_returned) || 0;
+      const qtyBorrowed = Number(r.qty_borrowed) || 0;
+      const qtyUnreturned = Math.max(0, qtyBrought - qtyReturned);
+      const qtyInDelivery = Math.max(0, qtyBrought - qtyReturned - qtyBorrowed);
+      const isFullyReturned = qtyBrought > 0 && qtyReturned >= qtyBrought && qtyBorrowed === 0;
+      return {
+        ...r,
+        qty_brought: qtyBrought,
+        qty_returned: qtyReturned,
+        qty_borrowed: qtyBorrowed,
+        qty_unreturned: qtyUnreturned,
+        qty_in_delivery: qtyInDelivery,
+        is_fully_returned: isFullyReturned
+      };
+    });
+
+    const brought = enrichedRows.filter(r => r.qty_brought > 0);
+    const activeRows = enrichedRows.filter(r => r.qty_unreturned > 0 || r.qty_borrowed > 0);
+    const inDeliveryRows = enrichedRows.filter(r => r.qty_in_delivery > 0);
+    const borrowed = enrichedRows.filter(r => r.qty_borrowed > 0);
+    const returned = enrichedRows.filter(r => r.is_fully_returned);
 
     res.json({
       brought,
+      in_delivery: inDeliveryRows,
       borrowed,
+      returned,
       summary: {
-        total_orders_with_equipment: new Set(brought.map(r => r.order_id)).size,
-        total_brought_qty: brought.reduce((s, r) => s + (Number(r.qty_brought) || 0), 0),
-        total_borrowed_qty: borrowed.reduce((s, r) => s + (Number(r.qty_borrowed) || 0), 0),
-        total_borrowed_items: borrowed.length
+        total_orders_with_equipment: new Set(activeRows.map(r => r.order_id)).size,
+        total_history_orders: new Set(brought.map(r => r.order_id)).size,
+        total_brought_qty: inDeliveryRows.reduce((s, r) => s + r.qty_in_delivery, 0),
+        total_unreturned_qty: activeRows.reduce((s, r) => s + Math.max(r.qty_unreturned, r.qty_borrowed), 0),
+        total_returned_qty: brought.reduce((s, r) => s + r.qty_returned, 0),
+        total_history_brought_qty: brought.reduce((s, r) => s + r.qty_brought, 0),
+        total_borrowed_qty: borrowed.reduce((s, r) => s + r.qty_borrowed, 0),
+        total_borrowed_items: borrowed.length,
+        total_in_delivery_items: inDeliveryRows.length,
+        total_returned_items: returned.length
       }
     });
   } catch (error) {
@@ -8175,8 +8212,10 @@ app.put('/api/orders/:id/equipment/:itemId/return', authenticateToken, authorize
 
     const row = rows[0];
     const brought = Number(row.qty_brought) || 0;
-    const addReturn = return_qty !== undefined ? Math.max(0, parseInt(return_qty, 10) || 0) : row.qty_borrowed;
-    const newReturned = Math.min(brought, (Number(row.qty_returned) || 0) + addReturn);
+    const currentReturned = Number(row.qty_returned) || 0;
+    const defaultReturnQty = Math.max(0, brought - currentReturned);
+    const addReturn = return_qty !== undefined ? Math.max(0, parseInt(return_qty, 10) || 0) : defaultReturnQty;
+    const newReturned = Math.min(brought, currentReturned + addReturn);
     const newBorrowed = Math.max(0, brought - newReturned);
 
     await pool.query(
